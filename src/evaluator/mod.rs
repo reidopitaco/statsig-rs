@@ -1,5 +1,9 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
+use chrono::{Datelike, TimeZone, Utc};
 use crossbeam::sync::ShardedLock;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -25,6 +29,59 @@ fn get_hash(s: String) -> u64 {
         | (*res.get(2).unwrap_or(&0) as u64) << 40
         | (*res.get(1).unwrap_or(&0) as u64) << 48
         | (*res.first().unwrap_or(&0) as u64) << 56
+}
+
+fn get_numeric_value(v: &serde_json::Value) -> Option<f64> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(_) => None,
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.parse().ok(),
+        serde_json::Value::Array(_) => None,
+        serde_json::Value::Object(_) => None,
+    }
+}
+
+fn compare_numbers(
+    v1: &serde_json::Value,
+    v2: &serde_json::Value,
+    f: fn(f64, f64) -> bool,
+) -> bool {
+    let n1 = get_numeric_value(v1);
+    let n2 = get_numeric_value(v2);
+    if n1.is_none() || n2.is_none() {
+        false
+    } else {
+        f(n1.unwrap_or_default(), n2.unwrap_or_default())
+    }
+}
+
+fn get_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => "".to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(_) => "".to_string(),
+        serde_json::Value::Object(_) => "".to_string(),
+    }
+}
+
+fn get_unix_epoch(v: &serde_json::Value) -> i64 {
+    let val = match v {
+        serde_json::Value::Null => 0,
+        serde_json::Value::Bool(_) => 0,
+        serde_json::Value::Number(n) => n.as_i64().unwrap_or_default(),
+        serde_json::Value::String(s) => s.parse().unwrap_or_default(),
+        serde_json::Value::Array(_) => 0,
+        serde_json::Value::Object(_) => 0,
+    };
+    if val > i32::MAX as i64 {
+        // handle receiving value in milliseconds
+        val / 1000
+    } else {
+        val
+    }
 }
 
 pub struct Evaluator {
@@ -146,7 +203,8 @@ impl Evaluator {
     }
 
     fn eval_condition(&self, user: &StatsigUser, condition: &ConfigCondition) -> EvalResult {
-        let empty = "".to_string();
+        let empty = json!(null);
+        let empty_str: String = "".to_string();
         let value = match condition.r#type {
             ConditionType::Public => return EvalResult::pass(),
             ConditionType::FailGate | ConditionType::PassGate => {
@@ -158,17 +216,20 @@ impl Evaluator {
             ConditionType::UaBased => {
                 return EvalResult::fetch_from_server(); // TODO
             }
-            ConditionType::UserField => user.get_field(condition.field.as_ref().unwrap_or(&empty)),
+            ConditionType::UserField => {
+                json!(user.get_field(condition.field.as_ref().unwrap_or(&empty_str)))
+            }
             ConditionType::EnvironmentField => {
                 return EvalResult::fetch_from_server(); // TODO
             }
-            ConditionType::CurrentTime => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
+            ConditionType::CurrentTime => json!(SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                .as_secs()),
             ConditionType::UserBucket => {
                 return EvalResult::fetch_from_server(); // TODO
             }
-            ConditionType::UnitId => user.get_unit_id(&condition.id_type),
+            ConditionType::UnitId => json!(user.get_unit_id(&condition.id_type)),
             ConditionType::Unknown => {
                 return EvalResult::fetch_from_server();
             }
@@ -179,18 +240,26 @@ impl Evaluator {
             .as_ref()
             .unwrap_or(&OperatorType::Unknown)
         {
-            OperatorType::Gt => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::Gte => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::Lt => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::Lte => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
+            OperatorType::Gt => compare_numbers(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |n1, n2| n1 > n2,
+            ),
+            OperatorType::Gte => compare_numbers(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |n1, n2| n1 >= n2,
+            ),
+            OperatorType::Lt => compare_numbers(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |n1, n2| n1 < n2,
+            ),
+            OperatorType::Lte => compare_numbers(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |n1, n2| n1 <= n2,
+            ),
             OperatorType::VersionGt => {
                 return EvalResult::fetch_from_server(); // TODO
             }
@@ -210,38 +279,28 @@ impl Evaluator {
                 return EvalResult::fetch_from_server(); // TODO
             }
             // Case insensitive
-            OperatorType::Any => match condition
-                .target_value
-                .as_ref()
-                .unwrap_or(&json!(null))
-                .as_array()
+            OperatorType::Any => match condition.target_value.as_ref().unwrap_or(&empty).as_array()
             {
                 None => false,
                 Some(arr) => arr.iter().any(|v| match v.as_str() {
                     None => false,
-                    Some(s) => s.to_ascii_lowercase() == value.to_ascii_lowercase(),
+                    Some(s) => s.to_ascii_lowercase() == get_string(&value).to_ascii_lowercase(),
                 }),
             },
             // Case insensitive
-            OperatorType::None => match condition
-                .target_value
-                .as_ref()
-                .unwrap_or(&json!(null))
-                .as_array()
-            {
-                None => false,
-                Some(arr) => !arr.iter().any(|v| match v.as_str() {
+            OperatorType::None => {
+                match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
                     None => false,
-                    Some(s) => s.to_ascii_lowercase() == value.to_ascii_lowercase(),
-                }),
-            },
+                    Some(arr) => !arr.iter().any(|v| match v.as_str() {
+                        None => false,
+                        Some(s) => {
+                            s.to_ascii_lowercase() == get_string(&value).to_ascii_lowercase()
+                        }
+                    }),
+                }
+            }
             OperatorType::AnyCaseSensitive => {
-                match condition
-                    .target_value
-                    .as_ref()
-                    .unwrap_or(&json!(null))
-                    .as_array()
-                {
+                match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
                     None => false,
                     Some(arr) => arr.iter().any(|v| match v.as_str() {
                         None => false,
@@ -250,12 +309,7 @@ impl Evaluator {
                 }
             }
             OperatorType::NoneCaseSensitive => {
-                match condition
-                    .target_value
-                    .as_ref()
-                    .unwrap_or(&json!(null))
-                    .as_array()
-                {
+                match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
                     None => false,
                     Some(arr) => !arr.iter().any(|v| match v.as_str() {
                         None => false,
@@ -278,32 +332,33 @@ impl Evaluator {
             OperatorType::StrMatches => {
                 return EvalResult::fetch_from_server(); // TODO
             }
-            OperatorType::Eq => match condition
-                .target_value
-                .as_ref()
-                .unwrap_or(&json!(null))
-                .as_str()
-            {
-                None => value.is_empty(),
+            OperatorType::Eq => match condition.target_value.as_ref().unwrap_or(&empty).as_str() {
+                None => {
+                    (value.is_string() && matches!(&value.as_str(), Some(""))) || value.is_null()
+                }
                 Some(target) => target == value,
             },
-            OperatorType::Neq => match condition
-                .target_value
-                .as_ref()
-                .unwrap_or(&json!(null))
-                .as_str()
-            {
-                None => !value.is_empty(),
+            OperatorType::Neq => match condition.target_value.as_ref().unwrap_or(&empty).as_str() {
+                None => {
+                    !((value.is_string() && matches!(&value.as_str(), Some(""))) || value.is_null())
+                }
                 Some(target) => target != value,
             },
             OperatorType::Before => {
-                return EvalResult::fetch_from_server(); // TODO
+                get_unix_epoch(&value)
+                    < get_unix_epoch(condition.target_value.as_ref().unwrap_or(&empty))
             }
             OperatorType::After => {
-                return EvalResult::fetch_from_server(); // TODO
+                get_unix_epoch(&value)
+                    > get_unix_epoch(condition.target_value.as_ref().unwrap_or(&empty))
             }
             OperatorType::On => {
-                return EvalResult::fetch_from_server(); // TODO
+                let d1 = Utc.timestamp(get_unix_epoch(&value), 0);
+                let d2 = Utc.timestamp(
+                    get_unix_epoch(condition.target_value.as_ref().unwrap_or(&empty)),
+                    0,
+                );
+                d1.day() == d2.day() && d1.month() == d2.month() && d1.year() == d2.year()
             }
             OperatorType::InSegmentList => {
                 return EvalResult::fetch_from_server(); // TODO
@@ -325,7 +380,11 @@ impl Evaluator {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::{
+        collections::HashMap,
+        ops::{Add, Sub},
+        time::{Duration, SystemTime},
+    };
 
     use serde_json::json;
 
@@ -358,6 +417,10 @@ mod test {
         custom_ids.insert("ALL_CAPS".to_string(), "ALL_CAPS".to_string());
         let user = StatsigUser {
             custom_ids: Some(custom_ids),
+            custom: Some(HashMap::from([(
+                "totalDeposit".to_string(),
+                "30".to_string(),
+            )])),
             ..StatsigUser::new(user_id, "production".to_string())
         };
         [
@@ -387,6 +450,114 @@ mod test {
                     fetch_from_server: true,
                     ..Default::default()
                 },
+            ),
+            (
+                "gt_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Gt),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("15".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "gt_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Gt),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("40".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "gt_fail_empty_field",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Gt),
+                    field: Some("somethingElse".to_string()),
+                    target_value: Some(json!("-5".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "gte_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Gte),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("30".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "gte_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Gte),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("40".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "lt_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Lt),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("40".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "lt_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Lt),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("20".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "lte_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Lte),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("30".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "lte_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Lte),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!("20".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
             ),
             (
                 "any_pass",
@@ -510,6 +681,119 @@ mod test {
                     operator: Some(OperatorType::Neq),
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "before_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::CurrentTime,
+                    operator: Some(OperatorType::Before),
+                    field: Some("field".to_string()),
+                    target_value: Some(json!(
+                        SystemTime::now()
+                            .add(Duration::from_secs(300))
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            * 1000
+                    )),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "before_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::CurrentTime,
+                    operator: Some(OperatorType::Before),
+                    field: Some("field".to_string()),
+                    target_value: Some(json!(
+                        SystemTime::now()
+                            .sub(Duration::from_secs(300))
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            * 1000
+                    )),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "after_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::CurrentTime,
+                    operator: Some(OperatorType::After),
+                    field: Some("field".to_string()),
+                    target_value: Some(json!(
+                        SystemTime::now()
+                            .sub(Duration::from_secs(300))
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            * 1000
+                    )),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "after_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::CurrentTime,
+                    operator: Some(OperatorType::After),
+                    field: Some("field".to_string()),
+                    target_value: Some(json!(
+                        SystemTime::now()
+                            .add(Duration::from_secs(300))
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            * 1000
+                    )),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "on_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::CurrentTime,
+                    operator: Some(OperatorType::On),
+                    field: Some("field".to_string()),
+                    target_value: Some(json!(
+                        SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            * 1000
+                    )),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "on_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::CurrentTime,
+                    operator: Some(OperatorType::On),
+                    field: Some("field".to_string()),
+                    target_value: Some(json!(
+                        SystemTime::now()
+                            .add(Duration::from_secs(36 * 60 * 60))
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs()
+                            * 1000
+                    )),
                     id_type: "userid".to_string(),
                 },
                 EvalResult::fail(),
