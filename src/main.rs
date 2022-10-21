@@ -11,6 +11,7 @@ async fn main() {
         "secret".to_string(),
         StatsigOptions {
             api_url: None,
+            events_url: None,
             disable_cache: false,
             config_sync_interval: Some(Duration::from_secs(5)),
         },

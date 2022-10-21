@@ -28,7 +28,7 @@ pub struct Client {
 
 impl Client {
     pub async fn new(api_key: String, options: StatsigOptions) -> Result<Arc<Self>> {
-        let http_client = StatsigHttpClient::new(api_key, options.api_url);
+        let http_client = StatsigHttpClient::new(api_key, options.api_url, options.events_url);
 
         let evaluator = Evaluator::new();
         if !options.disable_cache {
@@ -129,7 +129,11 @@ impl Client {
         }
 
         if !events.is_empty() {
-            match self.http_client.log_event(StatsigPost { events }).await {
+            match self
+                .http_client
+                .log_event_internal(StatsigPost { events })
+                .await
+            {
                 Ok(_) => (),
                 Err(e) => {
                     event!(Level::ERROR, "Failed to log events: {}", e);

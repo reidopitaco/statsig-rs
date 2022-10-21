@@ -13,6 +13,7 @@ use crate::{
 };
 
 const API_URL: &str = "https://api.statsig.com/v1";
+const EVENTS_URL: &str = "https://events.statsigapi.net/v1";
 
 /// The environment variable to change the default timeout for statsig requests.
 const STATSIG_TIMEOUT_MS: &str = "STATSIG_TIMEOUT_MS";
@@ -44,15 +45,18 @@ fn create_http_connection_client(key: &str) -> Client {
 #[derive(Clone)]
 pub struct StatsigHttpClient {
     base_url: String,
+    events_url: String,
     http_client: Client,
 }
 
 impl StatsigHttpClient {
-    pub fn new(api_key: String, api_url: Option<String>) -> Self {
+    pub fn new(api_key: String, api_url: Option<String>, events_url: Option<String>) -> Self {
         let base_url = api_url.unwrap_or_else(|| API_URL.to_string());
+        let events_url = events_url.unwrap_or_else(|| EVENTS_URL.to_string());
         let http_client = create_http_connection_client(&api_key);
         Self {
             base_url,
+            events_url,
             http_client,
         }
     }
@@ -135,6 +139,23 @@ impl StatsigHttpClient {
     }
 
     pub async fn log_event(&self, statsig_post: StatsigPost) -> Result<()> {
+        let url = format!("{}/log_event", self.events_url);
+
+        // TODO: Retry
+        let response = self.http_client.post(url).json(&statsig_post).send().await;
+
+        match response {
+            Ok(result) => match result.status() {
+                StatusCode::OK | StatusCode::CREATED | StatusCode::ACCEPTED => Ok(result),
+                err => Err(anyhow!("statsig error: {}", err)),
+            },
+            Err(err) => Err(anyhow!("failed to send request: {}", err)),
+        }?;
+
+        Ok(())
+    }
+
+    pub async fn log_event_internal(&self, statsig_post: StatsigPost) -> Result<()> {
         let url = format!("{}/log_event", self.base_url);
 
         // TODO: Retry
@@ -219,6 +240,7 @@ mod test {
         let client = StatsigHttpClient::new(
             "something".to_string(),
             Some(format!("http://{}", http_server.addr())),
+            None,
         );
 
         let user = StatsigUser::new("1234".to_string(), "test".to_string());
@@ -265,6 +287,7 @@ mod test {
 
         let client = StatsigHttpClient::new(
             "something".to_string(),
+            None,
             Some(format!("http://{}", http_server.addr())),
         );
 
