@@ -1,7 +1,7 @@
 Statsig client
 ==============
 
-WIP
+Unofficial lib to interact with statsig.io. It's still an early WIP version, but is already capable of handling some checks with cache and delegate other scenarios to an HTTP request to the API.
 
 Implements the logic described for their [Server SDKs](https://docs.statsig.com/server/introduction).
 

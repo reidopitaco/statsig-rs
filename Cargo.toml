@@ -2,6 +2,10 @@
 name = "statsig-rs"
 version = "0.1.0"
 edition = "2021"
+description = "Unofficial crate to interact with statsig.io"
+repository = "https://github.com/reidopitaco/statsig-rs"
+license = "ISC"
+keywords = ["statsig"]
 
 [lib]
 name = "statsig_rdp"
