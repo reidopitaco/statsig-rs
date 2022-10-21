@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use statsig::{
+use statsig_rdp::{
     models::{StatsigOptions, StatsigUser},
     Client,
 };
