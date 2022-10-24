@@ -1,0 +1,38 @@
+name: Lint and Tests
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  statsig-lint-and-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Setup Rust Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+
+      - name: Setup Rust Platform
+        uses: bash
+        run: |
+          chmod a+x setup.sh
+          ./setup.sh
+
+      - name: Lint and test
+        uses: bash
+        run: |
+          chmod a+x lint_and_test.sh
+          ./lint_and_test.sh
+
+      - name: Verify there were no code changes
+        shell: bash
+        run: |
+          chmod a+x code_changes.sh
+          ./code_changes.sh
