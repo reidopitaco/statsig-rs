@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct EvalResult {
     pub pass: bool,
-    // pub config_value: DynamicConfig,
+    pub config_value: Option<serde_json::Value>,
     pub fetch_from_server: bool,
     pub id: String,
     pub secondary_exposures: Vec<HashMap<String, String>>,
@@ -17,42 +17,30 @@ pub struct EvalResult {
 
 impl Default for EvalResult {
     fn default() -> Self {
-        Self {
-            pass: false,
-            fetch_from_server: false,
-            id: "default".to_string(),
-            secondary_exposures: vec![HashMap::new()],
-            // undelegated_secondary_exposures: None,
-            // config_delegate: None,
-            // explicit_parameters: None,
-        }
+        Self::fail()
     }
 }
 
 impl EvalResult {
     pub fn pass() -> Self {
-        Self::new(true, false, vec![])
+        Self::new(true, false)
     }
 
-    #[allow(dead_code)]
     pub fn fail() -> Self {
-        Self::new(false, false, vec![])
+        Self::new(false, false)
     }
 
     pub fn fetch_from_server() -> Self {
-        Self::new(false, true, vec![])
+        Self::new(false, true)
     }
 
-    pub fn new(
-        pass: bool,
-        fetch_from_server: bool,
-        secondary_exposures: Vec<HashMap<String, String>>,
-    ) -> Self {
+    fn new(pass: bool, fetch_from_server: bool) -> Self {
         Self {
             pass,
             fetch_from_server,
+            config_value: None,
             id: "default".to_string(),
-            secondary_exposures,
+            secondary_exposures: vec![],
         }
     }
 }
@@ -72,13 +60,22 @@ pub struct ConfigData {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigSpec {
     pub name: String,
-    pub r#type: String,
+    pub r#type: ConfigSpecType,
     pub salt: String,
     pub enabled: bool,
     pub rules: Option<Vec<ConfigRule>>,
-    pub default_value: serde_json::Value, // json.RawMessage
+    pub default_value: serde_json::Value,
     pub id_type: Option<String>,
     // pub explicit_parameters: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigSpecType {
+    DynamicConfig,
+    FeatureGate,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

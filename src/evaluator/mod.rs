@@ -6,41 +6,19 @@ use std::{
 use chrono::{Datelike, TimeZone, Utc};
 use crossbeam::sync::ShardedLock;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 
-use crate::{evaluator::models::OperatorType, models::StatsigUser};
+use crate::{
+    evaluator::{getters::get_config_value, models::OperatorType},
+    models::StatsigUser,
+};
 
+use self::getters::{get_hash, get_numeric_value, get_string, get_unix_epoch};
 use self::models::{
     ConditionType, ConfigCondition, ConfigData, ConfigRule, ConfigSpec, EvalResult,
 };
 
+mod getters;
 pub mod models;
-
-fn get_hash(s: String) -> u64 {
-    let mut hasher = Sha256::new();
-    hasher.update(s);
-    let res = hasher.finalize();
-    // TODO: Use from_le_bytes
-    (*res.get(7).unwrap_or(&0) as u64)
-        | (*res.get(6).unwrap_or(&0) as u64) << 8
-        | (*res.get(5).unwrap_or(&0) as u64) << 16
-        | (*res.get(4).unwrap_or(&0) as u64) << 24
-        | (*res.get(3).unwrap_or(&0) as u64) << 32
-        | (*res.get(2).unwrap_or(&0) as u64) << 40
-        | (*res.get(1).unwrap_or(&0) as u64) << 48
-        | (*res.first().unwrap_or(&0) as u64) << 56
-}
-
-fn get_numeric_value(v: &serde_json::Value) -> Option<f64> {
-    match v {
-        serde_json::Value::Null => None,
-        serde_json::Value::Bool(_) => None,
-        serde_json::Value::Number(n) => n.as_f64(),
-        serde_json::Value::String(s) => s.parse().ok(),
-        serde_json::Value::Array(_) => None,
-        serde_json::Value::Object(_) => None,
-    }
-}
 
 fn compare_numbers(
     v1: &serde_json::Value,
@@ -56,36 +34,22 @@ fn compare_numbers(
     }
 }
 
-fn get_string(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::Null => "".to_string(),
-        serde_json::Value::Bool(b) => b.to_string(),
-        serde_json::Value::Number(n) => n.to_string(),
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(_) => "".to_string(),
-        serde_json::Value::Object(_) => "".to_string(),
-    }
-}
-
-fn get_unix_epoch(v: &serde_json::Value) -> i64 {
-    let val = match v {
-        serde_json::Value::Null => 0,
-        serde_json::Value::Bool(_) => 0,
-        serde_json::Value::Number(n) => n.as_i64().unwrap_or_default(),
-        serde_json::Value::String(s) => s.parse().unwrap_or_default(),
-        serde_json::Value::Array(_) => 0,
-        serde_json::Value::Object(_) => 0,
-    };
-    if val > i32::MAX as i64 {
-        // handle receiving value in milliseconds
-        val / 1000
+fn eval_pass_percent(user: &StatsigUser, rule: &ConfigRule, spec: &ConfigSpec) -> bool {
+    let rule_salt = if rule.salt.is_empty() {
+        &rule.id
     } else {
-        val
-    }
+        &rule.salt
+    };
+    let hash = get_hash(format!(
+        "{}.{}.{}",
+        spec.salt,
+        rule_salt,
+        user.get_unit_id(&rule.id_type)
+    ));
+    ((hash % 10000) as f64) < ((rule.pass_percentage) * 100.0)
 }
 
 pub struct Evaluator {
-    #[allow(dead_code)]
     dynamic_configs: ShardedLock<HashMap<String, ConfigSpec>>,
     gates: ShardedLock<HashMap<String, ConfigSpec>>,
 }
@@ -128,13 +92,28 @@ impl Evaluator {
             .get(gate_name)
         {
             Some(gate) => self.eval_spec(user, gate),
-            None => EvalResult::default(),
+            None => EvalResult::fail(),
+        }
+    }
+
+    pub fn get_config_internal(&self, user: &StatsigUser, config_name: &String) -> EvalResult {
+        match self
+            .dynamic_configs
+            .read()
+            .expect("should always be able to acquire read lock")
+            .get(config_name)
+        {
+            Some(spec) => self.eval_spec(user, spec),
+            None => EvalResult::fail(),
         }
     }
 
     fn eval_spec(&self, user: &StatsigUser, spec: &ConfigSpec) -> EvalResult {
         if !spec.enabled {
-            return EvalResult::default();
+            return EvalResult {
+                id: "disabled".to_string(),
+                ..EvalResult::fail()
+            };
         }
 
         let mut exposures: Vec<HashMap<String, String>> = vec![];
@@ -149,37 +128,31 @@ impl Evaluator {
                     .for_each(|e| exposures.push(e));
 
                 if res.pass {
-                    // TODO: Eval delegates (??)
-                    let pass = self.eval_pass_percent(user, rule, spec);
+                    // TODO: Eval delegates
+                    let pass = eval_pass_percent(user, rule, spec);
+                    let config_value = if pass {
+                        get_config_value(&rule.return_value, spec.r#type)
+                    } else {
+                        get_config_value(&spec.default_value, spec.r#type)
+                    };
+
                     return EvalResult {
                         pass,
                         id: rule.id.clone(),
                         secondary_exposures: exposures,
+                        config_value,
                         ..Default::default()
                     };
                 }
             }
         }
 
+        // No rules matched, return the default value
         EvalResult {
             secondary_exposures: exposures,
-            ..Default::default()
+            config_value: get_config_value(&spec.default_value, spec.r#type),
+            ..EvalResult::fail()
         }
-    }
-
-    fn eval_pass_percent(&self, user: &StatsigUser, rule: &ConfigRule, spec: &ConfigSpec) -> bool {
-        let rule_salt = if rule.salt.is_empty() {
-            &rule.id
-        } else {
-            &rule.salt
-        };
-        let hash = get_hash(format!(
-            "{}.{}.{}",
-            spec.salt,
-            rule_salt,
-            user.get_unit_id(&rule.id_type)
-        ));
-        ((hash % 10000) as f64) < ((rule.pass_percentage) * 100.0)
     }
 
     fn eval_rule(&self, user: &StatsigUser, rule: &ConfigRule) -> EvalResult {
@@ -412,11 +385,11 @@ mod test {
     #[test]
     fn test_eval_condition_table() -> Result<(), String> {
         let user_id = "user_id".to_string();
-        let mut custom_ids = HashMap::new();
-        custom_ids.insert("not_userid".to_string(), "not_userid".to_string());
-        custom_ids.insert("ALL_CAPS".to_string(), "ALL_CAPS".to_string());
         let user = StatsigUser {
-            custom_ids: Some(custom_ids),
+            custom_ids: Some(HashMap::from([
+                ("not_userid".to_string(), "not_userid".to_string()),
+                ("ALL_CAPS".to_string(), "ALL_CAPS".to_string()),
+            ])),
             custom: Some(HashMap::from([(
                 "totalDeposit".to_string(),
                 "30".to_string(),
@@ -885,5 +858,4 @@ mod test {
                 .pass
         );
     }
-    // TODO: End to end test (check gate, parse from json)
 }

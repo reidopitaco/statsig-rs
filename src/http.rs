@@ -194,10 +194,7 @@ impl StatsigHttpClient {
         let res = match response {
             Ok(result) => match result.status() {
                 StatusCode::OK => Ok(result),
-                status => {
-                    println!("{:?}", result.text().await);
-                    Err(anyhow!("statsig error fetching source: {}", status))
-                }
+                status => Err(anyhow!("statsig error fetching source: {}", status)),
             },
             Err(err) => Err(anyhow!("failed to send request to fetch state: {}", err)),
         }?;
@@ -263,7 +260,7 @@ mod test {
                         "eventName":"teste",
                         "metadata":{
                         },
-                        "time":"testando",
+                        "time":"testing",
                         "user":{
                             "appVersion":null,
                             "country":null,
@@ -295,7 +292,7 @@ mod test {
             events: vec![StatsigEvent {
                 event_name: "teste".to_string(),
                 value: "10".to_string(),
-                time: "testando".to_string(),
+                time: "testing".to_string(),
                 user: StatsigUser::new("1".to_string(), "2".to_string()),
                 metadata: HashMap::new(),
             }],

@@ -4,7 +4,7 @@ use std::{
     time::SystemTime,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use serde::de::DeserializeOwned;
 use tokio::{time, time::Duration};
 use tracing::{event, Level};
@@ -16,6 +16,7 @@ use crate::{
 };
 
 const GATE_EXPOSURE_EVENT: &str = "statsig::gate_exposure";
+const CONFIG_EXPOSURE_EVENT: &str = "statsig::config_exposure";
 const MAX_LOG_EVENTS: usize = 950;
 
 /// Statsig client that has a local cache and syncs with the API periodically.
@@ -71,11 +72,27 @@ impl Client {
     }
 
     pub async fn get_dynamic_config<T: DeserializeOwned>(
-        &self,
+        self: Arc<Self>,
         config: String,
         user: StatsigUser,
     ) -> Result<T> {
-        self.http_client.get_dynamic_config(config, user).await
+        if user.user_id.is_empty() {
+            bail!("statsig: missing user id");
+        }
+
+        if self.disable_cache {
+            return self.http_client.get_dynamic_config(config, user).await;
+        }
+
+        let mut res = self.evaluator.get_config_internal(&user, &config);
+        if res.fetch_from_server {
+            self.http_client.get_dynamic_config(config, user).await
+        } else {
+            let val = res.config_value.take();
+            self.log_config_exposure(config, user, res);
+            let val = val.ok_or_else(|| anyhow!("empty config"))?;
+            Ok(serde_json::from_value(val)?)
+        }
     }
 
     pub async fn log_event(&self, statsig_post: StatsigPost) -> Result<()> {
@@ -160,6 +177,36 @@ impl Client {
             metadata: HashMap::from([
                 ("gate".to_string(), gate),
                 ("gateValue".to_string(), eval_result.pass.to_string()),
+                ("ruleID".to_string(), eval_result.id),
+            ]),
+        };
+        let mut events = self
+            .event_logs
+            .lock()
+            .expect("should always be able to acquire lock");
+        events.push(event);
+        if events.len() >= MAX_LOG_EVENTS {
+            tokio::spawn(self.clone().flush_logs());
+        }
+    }
+
+    fn log_config_exposure(
+        self: Arc<Self>,
+        config: String,
+        user: StatsigUser,
+        eval_result: EvalResult,
+    ) {
+        let event = StatsigEvent {
+            event_name: CONFIG_EXPOSURE_EVENT.to_string(),
+            value: eval_result.pass.to_string(),
+            time: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                .as_secs()
+                .to_string(),
+            user,
+            metadata: HashMap::from([
+                ("config".to_string(), config),
                 ("ruleID".to_string(), eval_result.id),
             ]),
         };
