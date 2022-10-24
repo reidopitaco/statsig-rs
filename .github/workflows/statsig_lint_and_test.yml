@@ -3,6 +3,8 @@ name: Lint and Tests
 on:
   pull_request:
   push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -20,13 +22,13 @@ jobs:
           toolchain: nightly
 
       - name: Setup Rust Platform
-        uses: bash
+        shell: bash
         run: |
           chmod a+x setup.sh
           ./setup.sh
 
       - name: Lint and test
-        uses: bash
+        shell: bash
         run: |
           chmod a+x lint_and_test.sh
           ./lint_and_test.sh
