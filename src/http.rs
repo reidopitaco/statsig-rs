@@ -30,9 +30,9 @@ fn create_http_connection_client(key: &str) -> Client {
         HeaderValue::from_str(key).expect("should be able to cast api key"),
     );
     let timeout = std::env::var(STATSIG_TIMEOUT_MS)
-        .unwrap_or_else(|_| "1000".to_string())
+        .unwrap_or_else(|_| "3000".to_string())
         .parse::<u64>()
-        .unwrap_or(1000);
+        .unwrap_or(3000);
     ClientBuilder::new()
         .pool_idle_timeout(Some(Duration::from_secs(60)))
         .tcp_keepalive(Some(Duration::from_secs(30)))
