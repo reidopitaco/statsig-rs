@@ -37,6 +37,28 @@ async fn main() {
             .await
     );
 
+    #[derive(Debug, serde::Deserialize)]
+    struct ConfigValue {
+        #[allow(dead_code)]
+        value: String,
+    }
+    let user = StatsigUser::new("1238".to_string(), "production".to_string());
+    println!(
+        "{:?}",
+        client
+            .clone()
+            .get_dynamic_config::<ConfigValue>("invalid_config".to_string(), user)
+            .await
+    );
+    let user = StatsigUser::new("1239".to_string(), "production".to_string());
+    println!(
+        "{:?}",
+        client
+            .clone()
+            .get_dynamic_config::<ConfigValue>("test_dynamic_config".to_string(), user)
+            .await
+    );
+
     tokio::time::sleep(tokio::time::Duration::from_secs(40)).await;
 
     let user = StatsigUser::new("1238".to_string(), "production".to_string());
