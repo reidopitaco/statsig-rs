@@ -181,7 +181,28 @@ impl Evaluator {
         let value = match condition.r#type {
             ConditionType::Public => return EvalResult::pass(),
             ConditionType::FailGate | ConditionType::PassGate => {
-                return EvalResult::fetch_from_server(); // TODO
+                let gate_name = match condition.target_value.as_ref().unwrap_or(&empty).as_str() {
+                    None => return EvalResult::fail(),
+                    Some(s) => s,
+                };
+                let mut res = self.check_gate_internal(user, &gate_name.to_string());
+                if res.fetch_from_server {
+                    return EvalResult::fetch_from_server();
+                }
+                let new_exposure = HashMap::from([
+                    ("gate".to_string(), gate_name.to_string()),
+                    ("gateValue".to_string(), res.pass.to_string()),
+                    ("ruleID".to_string(), res.id),
+                ]);
+                let mut exposures = std::mem::take(&mut res.secondary_exposures);
+                exposures.push(new_exposure);
+                let pass = (condition.r#type == ConditionType::PassGate && res.pass)
+                    || (condition.r#type == ConditionType::FailGate && !res.pass);
+                return EvalResult {
+                    pass,
+                    secondary_exposures: exposures,
+                    ..Default::default()
+                };
             }
             ConditionType::IpBased => {
                 return EvalResult::fetch_from_server(); // TODO
@@ -362,7 +383,10 @@ mod test {
     use serde_json::json;
 
     use super::{
-        models::{ConditionType, ConfigCondition, ConfigSpec, EvalResult, OperatorType},
+        models::{
+            ConditionType, ConfigCondition, ConfigRule, ConfigSpec, ConfigSpecType, EvalResult,
+            OperatorType,
+        },
         Evaluator,
     };
     use crate::{evaluator::models::ConfigData, models::StatsigUser};
@@ -373,7 +397,62 @@ mod test {
         condition: &ConfigCondition,
         expected: &EvalResult,
     ) -> Result<(), String> {
+        let default_configs = ConfigData {
+            dynamic_configs: None,
+            layer_configs: None,
+            has_updates: true,
+            time: None,
+            feature_gates: Some(vec![
+                ConfigSpec {
+                    name: "user_id_match".to_string(),
+                    r#type: ConfigSpecType::FeatureGate,
+                    salt: "salt".to_string(),
+                    enabled: true,
+                    default_value: json!(null),
+                    id_type: None,
+                    rules: Some(vec![ConfigRule {
+                        name: "user_id_match".to_string(),
+                        id: "user_id_id".to_string(),
+                        salt: "salt".to_string(),
+                        pass_percentage: 100.0,
+                        id_type: "userID".to_string(),
+                        return_value: json!(null),
+                        conditions: vec![ConfigCondition {
+                            r#type: ConditionType::UnitId,
+                            operator: Some(OperatorType::Eq),
+                            field: Some("field".to_string()),
+                            target_value: Some(json!("user_id".to_string())),
+                            id_type: "userid".to_string(),
+                        }],
+                    }]),
+                },
+                ConfigSpec {
+                    name: "user_id_not_match".to_string(),
+                    r#type: ConfigSpecType::FeatureGate,
+                    salt: "salt".to_string(),
+                    enabled: true,
+                    default_value: json!(null),
+                    id_type: None,
+                    rules: Some(vec![ConfigRule {
+                        name: "user_id_not_match".to_string(),
+                        id: "user_id_not_match_id".to_string(),
+                        salt: "salt".to_string(),
+                        pass_percentage: 100.0,
+                        id_type: "userID".to_string(),
+                        return_value: json!(null),
+                        conditions: vec![ConfigCondition {
+                            r#type: ConditionType::UnitId,
+                            operator: Some(OperatorType::Neq),
+                            field: Some("field".to_string()),
+                            target_value: Some(json!("user_id".to_string())),
+                            id_type: "userid".to_string(),
+                        }],
+                    }]),
+                },
+            ]),
+        };
         let evaluator = Evaluator::new();
+        evaluator.refresh_configs(default_configs);
         let result = evaluator.eval_condition(user, condition);
         if result.pass != expected.pass || result.fetch_from_server != expected.fetch_from_server {
             Err(format!("{}: failed", name))
@@ -767,6 +846,78 @@ mod test {
                             .as_secs()
                             * 1000
                     )),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "pass_gate_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::PassGate,
+                    operator: None,
+                    field: Some("field".to_string()),
+                    target_value: Some(json!("user_id_match".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "pass_gate_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::PassGate,
+                    operator: None,
+                    field: Some("field".to_string()),
+                    target_value: Some(json!("user_id_not_match".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "pass_gate_fail_gate_does_not_exist",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::PassGate,
+                    operator: None,
+                    field: Some("field".to_string()),
+                    target_value: Some(json!("invalid_gate".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "fail_gate_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::FailGate,
+                    operator: None,
+                    field: Some("field".to_string()),
+                    target_value: Some(json!("user_id_not_match".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "fail_gate_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::FailGate,
+                    operator: None,
+                    field: Some("field".to_string()),
+                    target_value: Some(json!("user_id_match".to_string())),
+                    id_type: "userid".to_string(),
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "fail_gate_fail_empty_target",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::FailGate,
+                    operator: None,
+                    field: Some("field".to_string()),
+                    target_value: None,
                     id_type: "userid".to_string(),
                 },
                 EvalResult::fail(),
