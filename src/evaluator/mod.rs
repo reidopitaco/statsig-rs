@@ -52,6 +52,8 @@ fn eval_pass_percent(user: &StatsigUser, rule: &ConfigRule, spec: &ConfigSpec) -
 pub struct Evaluator {
     dynamic_configs: ShardedLock<HashMap<String, ConfigSpec>>,
     gates: ShardedLock<HashMap<String, ConfigSpec>>,
+    #[allow(unused)]
+    layer_configs: ShardedLock<HashMap<String, ConfigSpec>>,
 }
 
 impl Evaluator {
@@ -59,6 +61,7 @@ impl Evaluator {
         Self {
             dynamic_configs: ShardedLock::new(HashMap::new()),
             gates: ShardedLock::new(HashMap::new()),
+            layer_configs: ShardedLock::new(HashMap::new()),
         }
     }
 
@@ -75,6 +78,12 @@ impl Evaluator {
             .into_iter()
             .map(|f| (f.name.clone(), f))
             .collect();
+        let layer_configs = data
+            .layer_configs
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| (f.name.clone(), f))
+            .collect();
         let mut configs = self
             .dynamic_configs
             .write()
@@ -82,6 +91,8 @@ impl Evaluator {
         *configs = dynamic_configs;
         let mut gates = self.gates.write().expect("should not be poisoned");
         *gates = feature_gates;
+        let mut layers = self.layer_configs.write().expect("should not be poisoned");
+        *layers = layer_configs;
     }
 
     pub fn check_gate_internal(&self, user: &StatsigUser, gate_name: &String) -> EvalResult {

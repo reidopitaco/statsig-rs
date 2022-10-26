@@ -50,8 +50,6 @@ pub struct ConfigData {
     pub dynamic_configs: Option<Vec<ConfigSpec>>,
     pub feature_gates: Option<Vec<ConfigSpec>>,
     pub layer_configs: Option<Vec<ConfigSpec>>,
-    // id_lists
-    // layers
     pub has_updates: bool,
     pub time: Option<u64>,
 }
