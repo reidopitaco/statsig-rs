@@ -232,7 +232,18 @@ impl Evaluator {
                 .unwrap_or_else(|_| Duration::from_secs(0))
                 .as_secs()),
             ConditionType::UserBucket => {
-                return EvalResult::fetch_from_server(); // TODO
+                if let Some(salt) = condition
+                    .additional_values
+                    .as_ref()
+                    .and_then(|h| h.get(&"salt".to_string()))
+                {
+                    json!(
+                        get_hash(format!("{}.{}", salt, user.get_unit_id(&condition.id_type)))
+                            % 1000
+                    )
+                } else {
+                    json!(null)
+                }
             }
             ConditionType::UnitId => json!(user.get_unit_id(&condition.id_type)),
             ConditionType::Unknown => {
@@ -284,30 +295,29 @@ impl Evaluator {
                 return EvalResult::fetch_from_server(); // TODO
             }
             // Case insensitive
-            OperatorType::Any => match condition.target_value.as_ref().unwrap_or(&empty).as_array()
-            {
-                None => false,
-                Some(arr) => arr.iter().any(|v| match v.as_str() {
-                    None => false,
-                    Some(s) => s.to_ascii_lowercase() == get_string(&value).to_ascii_lowercase(),
-                }),
-            },
-            // Case insensitive
-            OperatorType::None => {
+            OperatorType::Any => {
+                let lower_val = get_string(&value).map(|v| v.to_ascii_lowercase());
                 match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
                     None => false,
-                    Some(arr) => !arr.iter().any(|v| match v.as_str() {
-                        None => false,
-                        Some(s) => {
-                            s.to_ascii_lowercase() == get_string(&value).to_ascii_lowercase()
-                        }
-                    }),
+                    Some(arr) => arr
+                        .iter()
+                        .any(|v| get_string(v).map(|val| val.to_ascii_lowercase()) == lower_val),
+                }
+            }
+            // Case insensitive
+            OperatorType::None => {
+                let lower_val = get_string(&value).map(|v| v.to_ascii_lowercase());
+                match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
+                    None => true,
+                    Some(arr) => !arr
+                        .iter()
+                        .any(|v| get_string(v).map(|val| val.to_ascii_lowercase()) == lower_val),
                 }
             }
             OperatorType::AnyCaseSensitive => {
                 match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
                     None => false,
-                    Some(arr) => arr.iter().any(|v| match v.as_str() {
+                    Some(arr) => arr.iter().any(|v| match get_string(v) {
                         None => false,
                         Some(s) => s == value,
                     }),
@@ -315,8 +325,8 @@ impl Evaluator {
             }
             OperatorType::NoneCaseSensitive => {
                 match condition.target_value.as_ref().unwrap_or(&empty).as_array() {
-                    None => false,
-                    Some(arr) => !arr.iter().any(|v| match v.as_str() {
+                    None => true,
+                    Some(arr) => !arr.iter().any(|v| match get_string(v) {
                         None => false,
                         Some(s) => s == value,
                     }),
@@ -434,6 +444,7 @@ mod test {
                             field: Some("field".to_string()),
                             target_value: Some(json!("user_id".to_string())),
                             id_type: "userid".to_string(),
+                            additional_values: None,
                         }],
                     }]),
                 },
@@ -457,6 +468,7 @@ mod test {
                             field: Some("field".to_string()),
                             target_value: Some(json!("user_id".to_string())),
                             id_type: "userid".to_string(),
+                            additional_values: None,
                         }],
                     }]),
                 },
@@ -496,6 +508,7 @@ mod test {
                     field: None,
                     target_value: None,
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -508,11 +521,44 @@ mod test {
                     field: None,
                     target_value: None,
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult {
                     fetch_from_server: true,
                     ..Default::default()
                 },
+            ),
+            (
+                "user_bucket_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserBucket,
+                    operator: Some(OperatorType::Gt),
+                    field: None,
+                    target_value: Some(json!(500)),
+                    id_type: "userID".to_string(),
+                    additional_values: Some(HashMap::from([(
+                        "salt".to_string(),
+                        "cool_salt12".to_string(),
+                    )])),
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "user_bucket_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserBucket,
+                    operator: Some(OperatorType::Lte),
+                    field: None,
+                    target_value: Some(json!(500)),
+                    id_type: "userID".to_string(),
+                    additional_values: Some(HashMap::from([(
+                        "salt".to_string(),
+                        "cool_salt12".to_string(),
+                    )])),
+                },
+                EvalResult::fail(),
             ),
             (
                 "gt_pass",
@@ -523,6 +569,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("15".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -535,6 +582,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("40".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -547,6 +595,7 @@ mod test {
                     field: Some("somethingElse".to_string()),
                     target_value: Some(json!("-5".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -559,6 +608,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("30".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -571,6 +621,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("40".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -583,6 +634,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("40".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -595,6 +647,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("20".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -607,6 +660,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("30".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -619,6 +673,7 @@ mod test {
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("20".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -631,6 +686,20 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!(["not_userid".to_string(), "user_iD".to_string()])),
                     id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "any_pass_number",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::Any),
+                    field: Some("totalDeposit".to_string()),
+                    target_value: Some(json!([15, 30])),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -646,6 +715,7 @@ mod test {
                         "not_user_id2".to_string()
                     ])),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -655,12 +725,13 @@ mod test {
                 &ConfigCondition {
                     r#type: ConditionType::UnitId,
                     operator: Some(OperatorType::None),
-                    field: Some("field".to_string()),
+                    field: None,
                     target_value: Some(json!([
                         "not_userid".to_string(),
                         "not_user_id2".to_string()
                     ])),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -670,9 +741,10 @@ mod test {
                 &ConfigCondition {
                     r#type: ConditionType::UnitId,
                     operator: Some(OperatorType::None),
-                    field: Some("field".to_string()),
+                    field: None,
                     target_value: Some(json!(["not_userid".to_string(), "user_iD".to_string()])),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -685,6 +757,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -697,6 +770,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: None,
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -709,6 +783,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("notid".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -721,6 +796,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("notuser_id".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -733,6 +809,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: None,
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -745,6 +822,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -764,6 +842,7 @@ mod test {
                             * 1000
                     )),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -783,6 +862,7 @@ mod test {
                             * 1000
                     )),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -802,6 +882,7 @@ mod test {
                             * 1000
                     )),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -821,6 +902,7 @@ mod test {
                             * 1000
                     )),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -839,6 +921,7 @@ mod test {
                             * 1000
                     )),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -858,6 +941,7 @@ mod test {
                             * 1000
                     )),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -870,6 +954,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id_match".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -882,6 +967,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id_not_match".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -894,6 +980,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("invalid_gate".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -906,6 +993,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id_not_match".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::pass(),
             ),
@@ -918,6 +1006,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: Some(json!("user_id_match".to_string())),
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
@@ -930,6 +1019,7 @@ mod test {
                     field: Some("field".to_string()),
                     target_value: None,
                     id_type: "userid".to_string(),
+                    additional_values: None,
                 },
                 EvalResult::fail(),
             ),
