@@ -96,7 +96,7 @@ pub struct ConfigCondition {
     pub operator: Option<OperatorType>,
     pub field: Option<String>,
     pub target_value: Option<serde_json::Value>,
-    // pub additional_values: Option<HashMap<String, String>>, // map[string]interface{}
+    pub additional_values: Option<HashMap<String, String>>,
     pub id_type: String,
 }
 
