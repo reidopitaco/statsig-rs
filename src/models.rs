@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -20,6 +21,7 @@ pub struct StatsigEvent {
     // secondary_exposures
 }
 
+#[skip_serializing_none]
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigUser {
