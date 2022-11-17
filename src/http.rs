@@ -138,11 +138,11 @@ impl StatsigHttpClient {
         Ok(parsed.value)
     }
 
-    pub async fn log_event(&self, statsig_post: StatsigPost) -> Result<()> {
+    pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
         let url = format!("{}/log_event", self.events_url);
 
         // TODO: Retry
-        let response = self.http_client.post(url).json(&statsig_post).send().await;
+        let response = self.http_client.post(url).json(statsig_post).send().await;
 
         match response {
             Ok(result) => match result.status() {
@@ -297,7 +297,7 @@ mod test {
                 metadata: HashMap::new(),
             }],
         };
-        client.log_event(statsig_post).await?;
+        client.log_event(&statsig_post).await?;
         Ok(())
     }
 }

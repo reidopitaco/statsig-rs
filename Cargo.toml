@@ -1,6 +1,6 @@
 [package]
 name = "statsig-rs"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Unofficial crate to interact with statsig.io"
 repository = "https://github.com/reidopitaco/statsig-rs"
