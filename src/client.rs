@@ -95,7 +95,7 @@ impl Client {
         }
     }
 
-    pub async fn log_event(&self, statsig_post: StatsigPost) -> Result<()> {
+    pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
         self.http_client.log_event(statsig_post).await
     }
 }

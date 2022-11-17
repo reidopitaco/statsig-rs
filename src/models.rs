@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigPost {
     pub events: Vec<StatsigEvent>,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Clone, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigEvent {
     pub event_name: String,
@@ -22,7 +22,7 @@ pub struct StatsigEvent {
 }
 
 #[skip_serializing_none]
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigUser {
     #[serde(rename = "userID")]
@@ -70,7 +70,7 @@ impl StatsigOptions {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigEnvironment {
     pub tier: String,
