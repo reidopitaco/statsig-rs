@@ -35,6 +35,7 @@ pub struct StatsigUser {
     pub app_version: Option<String>,
     pub custom: Option<HashMap<String, String>>,
     pub private_atributes: Option<HashMap<String, String>>,
+    #[serde(rename = "customIDs")]
     pub custom_ids: Option<HashMap<String, String>>,
     pub statsig_environment: StatsigEnvironment,
 }
