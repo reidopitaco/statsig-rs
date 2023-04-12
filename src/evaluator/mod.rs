@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     collections::HashMap,
     time::{Duration, SystemTime},
 };
@@ -32,6 +33,49 @@ fn compare_numbers(
     } else {
         f(n1.unwrap_or_default(), n2.unwrap_or_default())
     }
+}
+
+fn compare_versions(v1: &serde_json::Value, v2: &serde_json::Value, f: fn(i32) -> bool) -> bool {
+    let n1 = get_string(v1);
+    let n2 = get_string(v2);
+    if n1.is_none() || n2.is_none() {
+        return false;
+    }
+
+    let mut n1 = n1.unwrap();
+    let mut n2 = n2.unwrap();
+    if let Some(index) = n1.find('-') {
+        n1 = n1[0..index].to_string();
+    }
+    if let Some(index) = n2.find('-') {
+        n2 = n2[0..index].to_string();
+    }
+
+    let n1_parts: Vec<&str> = n1.split('.').collect();
+    let n2_parts: Vec<&str> = n2.split('.').collect();
+    let mut cnt = 0;
+    let mut ret = 0;
+    while ret == 0 && cnt < max(n1_parts.len(), n2_parts.len()) {
+        let n1_val = if cnt < n1_parts.len() {
+            n1_parts[cnt].parse().unwrap_or_default()
+        } else {
+            0
+        };
+        let n2_val = if cnt < n2_parts.len() {
+            n2_parts[cnt].parse().unwrap_or_default()
+        } else {
+            0
+        };
+        if n1_val < n2_val {
+            ret = -1;
+        }
+        if n2_val < n1_val {
+            ret = 1;
+        }
+        cnt += 1;
+    }
+
+    f(ret)
 }
 
 fn eval_pass_percent(user: &StatsigUser, rule: &ConfigRule, spec: &ConfigSpec) -> bool {
@@ -276,24 +320,36 @@ impl Evaluator {
                 condition.target_value.as_ref().unwrap_or(&empty),
                 |n1, n2| n1 <= n2,
             ),
-            OperatorType::VersionGt => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::VersionGte => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::VersionLt => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::VersionLte => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::VersionEq => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
-            OperatorType::VersionNeq => {
-                return EvalResult::fetch_from_server(); // TODO
-            }
+            OperatorType::VersionGt => compare_versions(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |cmp| cmp > 0,
+            ),
+            OperatorType::VersionGte => compare_versions(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |cmp| cmp >= 0,
+            ),
+            OperatorType::VersionLt => compare_versions(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |cmp| cmp < 0,
+            ),
+            OperatorType::VersionLte => compare_versions(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |cmp| cmp <= 0,
+            ),
+            OperatorType::VersionEq => compare_versions(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |cmp| cmp == 0,
+            ),
+            OperatorType::VersionNeq => compare_versions(
+                &value,
+                condition.target_value.as_ref().unwrap_or(&empty),
+                |cmp| cmp != 0,
+            ),
             // Case insensitive
             OperatorType::Any => {
                 let lower_val = get_string(&value).map(|v| v.to_ascii_lowercase());
@@ -496,6 +552,7 @@ mod test {
                 "totalDeposit".to_string(),
                 "30".to_string(),
             )])),
+            app_version: Some("300.10.2".to_string()),
             ..StatsigUser::new(user_id, "production".to_string())
         };
         [
@@ -672,6 +729,136 @@ mod test {
                     operator: Some(OperatorType::Lte),
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("20".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "version_gt_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionGt),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.9.1".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "version_gt_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionGt),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.2".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "version_gte_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionGte),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.1".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "version_gte_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionGte),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.2".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "version_gte_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionGte),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.11.0".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "version_lt_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionLt),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.3".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "version_lt_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionLt),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("200.10.2".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "version_lte_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionLte),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.3".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "version_lte_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionLte),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.2".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "version_lte_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::UserField,
+                    operator: Some(OperatorType::VersionLte),
+                    field: Some("appVersion".to_string()),
+                    target_value: Some(json!("300.10.1".to_string())),
                     id_type: "userid".to_string(),
                     additional_values: None,
                 },
