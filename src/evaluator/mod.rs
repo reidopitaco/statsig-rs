@@ -269,7 +269,9 @@ impl Evaluator {
                 json!(user.get_field(condition.field.as_ref().unwrap_or(&empty_str)))
             }
             ConditionType::EnvironmentField => {
-                return EvalResult::fetch_from_server(); // TODO
+                json!(user
+                    .statsig_environment
+                    .get_field(condition.field.as_ref().unwrap_or(&empty_str)))
             }
             ConditionType::CurrentTime => json!(SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -729,6 +731,32 @@ mod test {
                     operator: Some(OperatorType::Lte),
                     field: Some("totalDeposit".to_string()),
                     target_value: Some(json!("20".to_string())),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::fail(),
+            ),
+            (
+                "environment_pass",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::EnvironmentField,
+                    operator: Some(OperatorType::Any),
+                    field: Some("tier".to_string()),
+                    target_value: Some(json!(["production".to_string(), "staging".to_string()])),
+                    id_type: "userid".to_string(),
+                    additional_values: None,
+                },
+                EvalResult::pass(),
+            ),
+            (
+                "environment_fail",
+                &user,
+                &ConfigCondition {
+                    r#type: ConditionType::EnvironmentField,
+                    operator: Some(OperatorType::Any),
+                    field: Some("tier".to_string()),
+                    target_value: Some(json!(["staging".to_string()])),
                     id_type: "userid".to_string(),
                     additional_values: None,
                 },

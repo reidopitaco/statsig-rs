@@ -77,6 +77,16 @@ pub struct StatsigEnvironment {
     pub tier: String,
 }
 
+impl StatsigEnvironment {
+    pub fn get_field(&self, field: &str) -> String {
+        let empty = "".to_string();
+        match field.to_ascii_lowercase().as_str() {
+            "tier" => self.tier.clone(),
+            _ => empty,
+        }
+    }
+}
+
 impl StatsigUser {
     pub fn new(user_id: String, tier: String) -> Self {
         StatsigUser {
@@ -93,9 +103,7 @@ impl StatsigUser {
             statsig_environment: StatsigEnvironment { tier },
         }
     }
-}
 
-impl StatsigUser {
     /// Fetch the id of id_type for the user, defaults to user_id.
     pub fn get_unit_id(&self, id_type: &String) -> String {
         if id_type.to_ascii_lowercase() == *"userid" {
