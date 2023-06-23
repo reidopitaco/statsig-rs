@@ -10,6 +10,9 @@ pub struct EvalResult {
     pub fetch_from_server: bool,
     pub id: String,
     pub secondary_exposures: Vec<HashMap<String, String>>,
+    pub group: String,
+    pub group_name: String,
+    pub rule_id: String,
     // pub undelegated_secondary_exposures: Option<Vec<HashMap<String, String>>>,
     // pub config_delegate: Option<String>,
     // pub explicit_parameters: Option<HashMap<String, bool>>,
@@ -39,8 +42,11 @@ impl EvalResult {
             pass,
             fetch_from_server,
             config_value: None,
-            id: "default".to_string(),
+            id: "default".to_owned(),
             secondary_exposures: vec![],
+            group: "default".to_owned(),
+            group_name: "default".to_owned(),
+            rule_id: "default".to_owned(),
         }
     }
 }
@@ -86,6 +92,7 @@ pub struct ConfigRule {
     pub conditions: Vec<ConfigCondition>,
     pub return_value: serde_json::Value, // json.RawMessage
     pub id_type: String,
+    pub group_name: String,
     // pub config_delegate: String,
 }
 

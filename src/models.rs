@@ -4,6 +4,15 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::collections::HashMap;
 
+#[derive(Serialize, Deserialize)]
+pub struct StatsigConfig<T> {
+    pub value: Option<T>,
+    pub name: String,
+    pub group_name: String,
+    pub rule_id: String,
+    pub group: String,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigPost {

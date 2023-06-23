@@ -98,6 +98,7 @@ pub fn expect_fetch_config_specs(server: &Server) {
                         "idType": "userID",
                         "rules": [{
                             "name": "public",
+                            "groupName": "public",
                             "id": "public1",
                             "salt": "salt_rule",
                             "passPercentage": 100,
