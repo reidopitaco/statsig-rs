@@ -12,7 +12,7 @@ use tracing::{event, Level};
 use crate::{
     evaluator::{models::EvalResult, Evaluator},
     http::StatsigHttpClient,
-    models::{StatsigEvent, StatsigOptions, StatsigPost, StatsigUser},
+    models::{StatsigConfig, StatsigEvent, StatsigOptions, StatsigPost, StatsigUser},
 };
 
 const GATE_EXPOSURE_EVENT: &str = "statsig::gate_exposure";
@@ -84,7 +84,7 @@ impl Client {
             return self.http_client.get_dynamic_config(config, user).await;
         }
 
-        let mut res = self.evaluator.get_config_internal(&user, &config);
+        let mut res = self.evaluator.get_dynamic_config_internal(&user, &config);
         if res.fetch_from_server {
             self.http_client.get_dynamic_config(config, user).await
         } else {
@@ -92,6 +92,42 @@ impl Client {
             self.log_config_exposure(config, user, res);
             let val = val.ok_or_else(|| anyhow!("empty config"))?;
             Ok(serde_json::from_value(val)?)
+        }
+    }
+
+    /// Returns the value, together with the metadata about the group that matched the check
+    pub async fn get_config<T: DeserializeOwned>(
+        self: Arc<Self>,
+        config: String,
+        user: StatsigUser,
+    ) -> Result<StatsigConfig<T>> {
+        if user.user_id.is_empty() {
+            bail!("statsig: missing user id");
+        }
+
+        if self.disable_cache {
+            return self.http_client.get_config(config, user).await;
+        }
+
+        let res = self.evaluator.get_dynamic_config_internal(&user, &config);
+        if res.fetch_from_server {
+            self.http_client.get_config(config, user).await
+        } else {
+            let value: Option<T> = serde_json::from_value(
+                res.config_value.clone().unwrap_or(serde_json::Value::Null),
+            )?;
+
+            let val = StatsigConfig {
+                value,
+                name: config.clone(),
+                group_name: res.group_name.clone(),
+                rule_id: res.rule_id.clone(),
+                group: res.group.clone(),
+            };
+
+            self.log_config_exposure(config, user, res);
+
+            Ok(val)
         }
     }
 

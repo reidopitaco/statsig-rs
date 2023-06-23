@@ -9,7 +9,7 @@ use tokio::time::Duration;
 
 use crate::{
     evaluator::models::ConfigData,
-    models::{StatsigPost, StatsigUser},
+    models::{StatsigConfig, StatsigPost, StatsigUser},
 };
 
 const API_URL: &str = "https://api.statsig.com/v1";
@@ -138,6 +138,41 @@ impl StatsigHttpClient {
         Ok(parsed.value)
     }
 
+    pub async fn get_config<T: DeserializeOwned>(
+        &self,
+        config: String,
+        user: StatsigUser,
+    ) -> Result<StatsigConfig<T>> {
+        #[derive(Serialize)]
+        struct GetConfigBody {
+            user: StatsigUser,
+            #[serde(rename = "configName")]
+            config_name: String,
+        }
+
+        let url = format!("{}/get_config", self.base_url);
+        let body = GetConfigBody {
+            user,
+            config_name: config,
+        };
+
+        let response = self.http_client.post(url).json(&body).send().await;
+        let res = match response {
+            Ok(result) => match result.status() {
+                StatusCode::OK => Ok(result),
+                err => Err(anyhow!("statsig error: {}", err)),
+            },
+            Err(err) => Err(anyhow!("failed to send request: {}", err)),
+        }?;
+
+        let parsed = match res.json::<StatsigConfig<T>>().await {
+            Ok(parsed) => Ok(parsed),
+            Err(err) => Err(anyhow!("error parsing: {}", err)),
+        }?;
+
+        Ok(parsed)
+    }
+
     pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
         let url = format!("{}/log_event", self.events_url);
 
@@ -246,6 +281,48 @@ mod test {
             .await?;
 
         assert_eq!("1234", result.merchant_id);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_config() -> Result<()> {
+        let http_server = Server::run();
+        http_server.expect(
+            Expectation::matching(request::method_path("POST", "/get_config")).respond_with(
+                json_encoded(json!({
+                    "name": "experiment_name",
+                    "value": {
+                        "merchant_id": "1234",
+                        "not_parsed": 1234
+                    },
+                    "group": "experiment_group",
+                    "rule_id": "rule_id",
+                    "group_name": "Experiment group",
+                })),
+            ),
+        );
+
+        #[derive(Deserialize)]
+        struct ConfigTestValue {
+            merchant_id: String,
+        }
+
+        let client = StatsigHttpClient::new(
+            "something".to_string(),
+            Some(format!("http://{}", http_server.addr())),
+            None,
+        );
+
+        let user = StatsigUser::new("1234".to_string(), "test".to_string());
+        let result: StatsigConfig<ConfigTestValue> =
+            client.get_config("dynamic".to_string(), user).await?;
+
+        assert_eq!("1234", result.value.unwrap().merchant_id);
+        assert_eq!("experiment_name", result.name);
+        assert_eq!("experiment_group", result.group);
+        assert_eq!("Experiment group", result.group_name);
+        assert_eq!("rule_id", result.rule_id);
 
         Ok(())
     }

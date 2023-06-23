@@ -110,7 +110,7 @@ impl Evaluator {
     }
 
     pub fn refresh_configs(&self, data: ConfigData) {
-        let dynamic_configs = data
+        let new_dynamic_configs = data
             .dynamic_configs
             .unwrap_or_default()
             .into_iter()
@@ -128,11 +128,12 @@ impl Evaluator {
             .into_iter()
             .map(|f| (f.name.clone(), f))
             .collect();
-        let mut configs = self
+
+        let mut dynamic_configs = self
             .dynamic_configs
             .write()
             .expect("should not be poisoned");
-        *configs = dynamic_configs;
+        *dynamic_configs = new_dynamic_configs;
         let mut gates = self.gates.write().expect("should not be poisoned");
         *gates = feature_gates;
         let mut layers = self.layer_configs.write().expect("should not be poisoned");
@@ -151,7 +152,11 @@ impl Evaluator {
         }
     }
 
-    pub fn get_config_internal(&self, user: &StatsigUser, config_name: &String) -> EvalResult {
+    pub fn get_dynamic_config_internal(
+        &self,
+        user: &StatsigUser,
+        config_name: &String,
+    ) -> EvalResult {
         match self
             .dynamic_configs
             .read()
@@ -185,10 +190,20 @@ impl Evaluator {
                 if res.pass {
                     // TODO: Eval delegates
                     let pass = eval_pass_percent(user, rule, spec);
-                    let config_value = if pass {
-                        get_config_value(&rule.return_value, spec.r#type)
+                    let (config_value, group, group_name, rule_id) = if pass {
+                        (
+                            get_config_value(&rule.return_value, spec.r#type),
+                            rule.name.clone(),
+                            rule.group_name.clone(),
+                            rule.id.clone(),
+                        )
                     } else {
-                        get_config_value(&spec.default_value, spec.r#type)
+                        (
+                            get_config_value(&spec.default_value, spec.r#type),
+                            "default".to_owned(),
+                            "default".to_owned(),
+                            "default".to_owned(),
+                        )
                     };
 
                     return EvalResult {
@@ -196,6 +211,9 @@ impl Evaluator {
                         id: rule.id.clone(),
                         secondary_exposures: exposures,
                         config_value,
+                        group,
+                        group_name,
+                        rule_id,
                         ..Default::default()
                     };
                 }
@@ -491,6 +509,7 @@ mod test {
                     id_type: None,
                     rules: Some(vec![ConfigRule {
                         name: "user_id_match".to_string(),
+                        group_name: "User id match".to_owned(),
                         id: "user_id_id".to_string(),
                         salt: "salt".to_string(),
                         pass_percentage: 100.0,
@@ -515,6 +534,7 @@ mod test {
                     id_type: None,
                     rules: Some(vec![ConfigRule {
                         name: "user_id_not_match".to_string(),
+                        group_name: "User id not match".to_owned(),
                         id: "user_id_not_match_id".to_string(),
                         salt: "salt".to_string(),
                         pass_percentage: 100.0,
@@ -1257,6 +1277,7 @@ mod test {
             "idType": "userID",
             "rules": [{
                 "name": "public",
+                "groupName": "public",
                 "id": "public1",
                 "salt": "salt_rule",
                 "passPercentage": 100,
@@ -1298,6 +1319,7 @@ mod test {
             "idType": "userID",
             "rules": [{
                 "name": "public",
+                "groupName": "public",
                 "id": "public1",
                 "salt": "salt_rule",
                 "passPercentage": 0,
