@@ -9,11 +9,14 @@ use tokio::time::Duration;
 
 use crate::{
     evaluator::models::ConfigData,
-    models::{StatsigConfig, StatsigPost, StatsigUser},
+    models::{StatsigConfig, StatsigEvent, StatsigPost, StatsigUser},
 };
 
 const API_URL: &str = "https://api.statsig.com/v1";
 const EVENTS_URL: &str = "https://events.statsigapi.net/v1";
+const RUST_SDK: &str = "rust-server";
+// TODO: Proper versioning
+const RUST_SDK_VERSION: &str = "0.0.1";
 
 /// The environment variable to change the default timeout for statsig requests.
 const STATSIG_TIMEOUT_MS: &str = "STATSIG_TIMEOUT_MS";
@@ -176,8 +179,20 @@ impl StatsigHttpClient {
     pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
         let url = format!("{}/log_event", self.events_url);
 
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PostBody<'a> {
+            events: &'a [StatsigEvent],
+            sdk_type: &'a str,
+            sdk_version: &'a str,
+        }
+        let body = PostBody {
+            events: &statsig_post.events,
+            sdk_type: RUST_SDK,
+            sdk_version: RUST_SDK_VERSION,
+        };
         // TODO: Retry
-        let response = self.http_client.post(url).json(statsig_post).send().await;
+        let response = self.http_client.post(url).json(&body).send().await;
 
         match response {
             Ok(result) => match result.status() {
@@ -191,20 +206,7 @@ impl StatsigHttpClient {
     }
 
     pub async fn log_event_internal(&self, statsig_post: StatsigPost) -> Result<()> {
-        let url = format!("{}/log_event", self.base_url);
-
-        // TODO: Retry
-        let response = self.http_client.post(url).json(&statsig_post).send().await;
-
-        match response {
-            Ok(result) => match result.status() {
-                StatusCode::OK | StatusCode::CREATED | StatusCode::ACCEPTED => Ok(result),
-                err => Err(anyhow!("statsig error: {}", err)),
-            },
-            Err(err) => Err(anyhow!("failed to send request: {}", err)),
-        }?;
-
-        Ok(())
+        self.log_event(&statsig_post).await
     }
 
     pub async fn fetch_state_from_source(&self, last_time: u64) -> Result<ConfigData> {
@@ -212,11 +214,15 @@ impl StatsigHttpClient {
 
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
-        struct GetConfigBody {
+        struct GetConfigBody<'a> {
             since_time: u64,
+            sdk_type: &'a str,
+            sdk_version: &'a str,
         }
         let body = GetConfigBody {
             since_time: last_time,
+            sdk_type: RUST_SDK,
+            sdk_version: RUST_SDK_VERSION,
         };
 
         let response = self
@@ -233,7 +239,6 @@ impl StatsigHttpClient {
             },
             Err(err) => Err(anyhow!("failed to send request to fetch state: {}", err)),
         }?;
-
         res.json::<ConfigData>()
             .await
             .map_err(|e| anyhow!("error parsing state response: {}", e))
