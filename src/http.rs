@@ -6,6 +6,10 @@ use reqwest::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::time::Duration;
+use tokio_retry::{
+    strategy::{jitter, ExponentialBackoff},
+    Retry,
+};
 
 use crate::{
     evaluator::models::ConfigData,
@@ -225,13 +229,20 @@ impl StatsigHttpClient {
             sdk_version: RUST_SDK_VERSION,
         };
 
-        let response = self
-            .http_client
-            .post(url)
-            .timeout(Duration::from_secs(10))
-            .json(&body)
-            .send()
-            .await;
+        let retry_strategy = ExponentialBackoff::from_millis(1)
+            .factor(5)
+            .max_delay(Duration::from_secs(10))
+            .map(jitter)
+            .take(5);
+        let response = Retry::spawn(retry_strategy, || async {
+            self.http_client
+                .post(url.clone())
+                .timeout(Duration::from_secs(10))
+                .json(&body)
+                .send()
+                .await
+        })
+        .await;
         let res = match response {
             Ok(result) => match result.status() {
                 StatusCode::OK => Ok(result),
