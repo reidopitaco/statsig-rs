@@ -235,11 +235,7 @@ impl StatsigHttpClient {
             .map(jitter)
             .take(5);
         let response = Retry::spawn(retry_strategy, || async {
-            self.http_client
-                .post(url.clone())
-                .json(&body)
-                .send()
-                .await
+            self.http_client.post(url.clone()).json(&body).send().await
         })
         .await;
         let res = match response {
