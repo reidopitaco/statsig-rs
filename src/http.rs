@@ -237,7 +237,6 @@ impl StatsigHttpClient {
         let response = Retry::spawn(retry_strategy, || async {
             self.http_client
                 .post(url.clone())
-                .timeout(Duration::from_secs(10))
                 .json(&body)
                 .send()
                 .await
