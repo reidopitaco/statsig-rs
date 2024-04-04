@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub struct StatsigConfig<T> {
     pub value: Option<T>,
     pub name: String,
-    pub group_name: String,
+    pub group_name: Option<String>,
     pub rule_id: String,
     pub group: String,
 }
