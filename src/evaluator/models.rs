@@ -82,7 +82,7 @@ pub enum ConfigSpecType {
     Unknown,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigRule {
     pub name: String,
