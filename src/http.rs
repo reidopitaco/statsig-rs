@@ -332,7 +332,7 @@ mod test {
         assert_eq!("1234", result.value.unwrap().merchant_id);
         assert_eq!("experiment_name", result.name);
         assert_eq!("experiment_group", result.group);
-        assert_eq!("Experiment group", result.group_name);
+        assert_eq!(Some("Experiment group".to_string()), result.group_name);
         assert_eq!("rule_id", result.rule_id);
 
         Ok(())

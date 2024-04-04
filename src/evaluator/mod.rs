@@ -201,7 +201,7 @@ impl Evaluator {
                         (
                             get_config_value(&spec.default_value, spec.r#type),
                             "default".to_owned(),
-                            "default".to_owned(),
+                            Some("default".to_owned()),
                             "default".to_owned(),
                         )
                     };
@@ -509,7 +509,7 @@ mod test {
                     id_type: None,
                     rules: Some(vec![ConfigRule {
                         name: "user_id_match".to_string(),
-                        group_name: "User id match".to_owned(),
+                        group_name: Some("User id match".to_owned()),
                         id: "user_id_id".to_string(),
                         salt: "salt".to_string(),
                         pass_percentage: 100.0,
@@ -534,7 +534,7 @@ mod test {
                     id_type: None,
                     rules: Some(vec![ConfigRule {
                         name: "user_id_not_match".to_string(),
-                        group_name: "User id not match".to_owned(),
+                        group_name: Some("User id not match".to_owned()),
                         id: "user_id_not_match_id".to_string(),
                         salt: "salt".to_string(),
                         pass_percentage: 100.0,
