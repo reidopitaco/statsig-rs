@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "statsig-rs"
-version = "0.7.3"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",

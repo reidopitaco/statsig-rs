@@ -55,6 +55,7 @@ pub struct StatsigUser {
 /// The default value for config_sync_interval is 15s
 pub struct StatsigOptions {
     pub api_url: Option<String>,
+    pub cdn_url: Option<String>,
     pub events_url: Option<String>,
     pub disable_cache: bool,
     pub config_sync_interval: Option<Duration>,
@@ -64,6 +65,7 @@ impl StatsigOptions {
     pub fn default() -> Self {
         Self {
             api_url: None,
+            cdn_url: None,
             disable_cache: false,
             config_sync_interval: None,
             events_url: None,
@@ -73,6 +75,7 @@ impl StatsigOptions {
     pub fn cache_disabled() -> Self {
         Self {
             api_url: None,
+            cdn_url: None,
             disable_cache: true,
             config_sync_interval: None,
             events_url: None,

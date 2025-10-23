@@ -18,6 +18,7 @@ use crate::{
 
 const API_URL: &str = "https://api.statsig.com/v1";
 const EVENTS_URL: &str = "https://events.statsigapi.net/v1";
+const CDN_URL: &str = "https://api.statsigcdn.com/v1";
 const RUST_SDK: &str = "rust-server";
 // TODO: Proper versioning
 const RUST_SDK_VERSION: &str = "0.0.1";
@@ -51,18 +52,28 @@ fn create_http_connection_client(key: &str) -> Client {
 
 #[derive(Clone)]
 pub struct StatsigHttpClient {
+    api_key: String,
     base_url: String,
+    cdn_url: String,
     events_url: String,
     http_client: Client,
 }
 
 impl StatsigHttpClient {
-    pub fn new(api_key: String, api_url: Option<String>, events_url: Option<String>) -> Self {
+    pub fn new(
+        api_key: String,
+        api_url: Option<String>,
+        cdn_url: Option<String>,
+        events_url: Option<String>,
+    ) -> Self {
         let base_url = api_url.unwrap_or_else(|| API_URL.to_string());
+        let cdn_url = cdn_url.unwrap_or_else(|| CDN_URL.to_string());
         let events_url = events_url.unwrap_or_else(|| EVENTS_URL.to_string());
         let http_client = create_http_connection_client(&api_key);
         Self {
+            api_key,
             base_url,
+            cdn_url,
             events_url,
             http_client,
         }
@@ -213,21 +224,11 @@ impl StatsigHttpClient {
         self.log_event(&statsig_post).await
     }
 
-    pub async fn fetch_state_from_source(&self, last_time: u64) -> Result<ConfigData> {
-        let url = format!("{}/download_config_specs", self.base_url);
-
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct GetConfigBody<'a> {
-            since_time: u64,
-            sdk_type: &'a str,
-            sdk_version: &'a str,
-        }
-        let body = GetConfigBody {
-            since_time: last_time,
-            sdk_type: RUST_SDK,
-            sdk_version: RUST_SDK_VERSION,
-        };
+    pub async fn fetch_state_from_source(&self) -> Result<ConfigData> {
+        let url = format!(
+            "{}/download_config_specs/{}.json",
+            self.cdn_url, self.api_key
+        );
 
         let retry_strategy = ExponentialBackoff::from_millis(1)
             .factor(5)
@@ -235,7 +236,7 @@ impl StatsigHttpClient {
             .map(jitter)
             .take(5);
         let response = Retry::spawn(retry_strategy, || async {
-            self.http_client.post(url.clone()).json(&body).send().await
+            self.http_client.get(url.clone()).send().await
         })
         .await;
         let res = match response {
@@ -284,6 +285,7 @@ mod test {
             "something".to_string(),
             Some(format!("http://{}", http_server.addr())),
             None,
+            None,
         );
 
         let user = StatsigUser::new("1234".to_string(), "test".to_string());
@@ -322,6 +324,7 @@ mod test {
         let client = StatsigHttpClient::new(
             "something".to_string(),
             Some(format!("http://{}", http_server.addr())),
+            None,
             None,
         );
 
@@ -372,6 +375,7 @@ mod test {
 
         let client = StatsigHttpClient::new(
             "something".to_string(),
+            None,
             None,
             Some(format!("http://{}", http_server.addr())),
         );
