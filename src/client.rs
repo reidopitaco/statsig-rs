@@ -29,11 +29,16 @@ pub struct Client {
 
 impl Client {
     pub async fn new(api_key: String, options: StatsigOptions) -> Result<Arc<Self>> {
-        let http_client = StatsigHttpClient::new(api_key, options.api_url, options.events_url);
+        let http_client = StatsigHttpClient::new(
+            api_key,
+            options.api_url,
+            options.cdn_url,
+            options.events_url,
+        );
 
         let evaluator = Evaluator::new();
         if !options.disable_cache {
-            let initial_data = http_client.fetch_state_from_source(0).await?;
+            let initial_data = http_client.fetch_state_from_source().await?;
             evaluator.refresh_configs(initial_data);
         }
 
@@ -141,11 +146,10 @@ impl Client {
     async fn poll_for_changes(self: Arc<Self>, config_sync_interval: Option<Duration>) {
         let mut interval =
             time::interval(config_sync_interval.unwrap_or_else(|| Duration::from_secs(20)));
-        let mut last_time: u64 = 0;
         loop {
             interval.tick().await;
             event!(Level::DEBUG, "Refreshing statsig configs");
-            let new_state = match self.http_client.fetch_state_from_source(last_time).await {
+            let new_state = match self.http_client.fetch_state_from_source().await {
                 Ok(s) => s,
                 Err(e) => {
                     event!(Level::ERROR, "Failed to fetch state: {}", e);
@@ -154,7 +158,6 @@ impl Client {
             };
             if new_state.has_updates {
                 event!(Level::DEBUG, "Statsig state has changed");
-                last_time = new_state.time.unwrap_or_default();
                 self.evaluator.refresh_configs(new_state);
             }
         }
