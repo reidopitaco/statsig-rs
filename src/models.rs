@@ -13,7 +13,6 @@ pub struct StatsigConfig<T> {
     pub group: String,
 }
 
-/// Represents the result of an experiment evaluation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatsigExperiment<T> {
     pub value: Option<T>,
@@ -21,12 +20,10 @@ pub struct StatsigExperiment<T> {
     pub group_name: Option<String>,
     pub rule_id: String,
     pub group: String,
-    /// Secondary exposures (gates that were evaluated as part of this experiment)
     #[serde(default)]
     pub secondary_exposures: Vec<SecondaryExposure>,
 }
 
-/// Represents a secondary exposure (e.g., a gate that was checked as part of an experiment)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecondaryExposure {
@@ -53,7 +50,6 @@ impl SecondaryExposure {
     }
 }
 
-/// Request body for logging custom experiment exposures
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExperimentExposurePost {
@@ -62,7 +58,6 @@ pub struct ExperimentExposurePost {
     pub statsig_metadata: Option<StatsigMetadata>,
 }
 
-/// A single experiment exposure to log
 #[skip_serializing_none]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,7 +70,6 @@ pub struct ExperimentExposure {
     pub secondary_exposures: Vec<SecondaryExposure>,
 }
 
-/// SDK metadata for tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigMetadata {
