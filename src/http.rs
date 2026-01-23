@@ -13,7 +13,7 @@ use tokio_retry::{
 
 use crate::{
     evaluator::models::ConfigData,
-    models::{StatsigConfig, StatsigEvent, StatsigPost, StatsigUser},
+    models::{ExperimentExposurePost, StatsigConfig, StatsigEvent, StatsigMetadata, StatsigPost, StatsigUser},
 };
 
 const API_URL: &str = "https://api.statsig.com/v1";
@@ -222,6 +222,37 @@ impl StatsigHttpClient {
 
     pub async fn log_event_internal(&self, statsig_post: StatsigPost) -> Result<()> {
         self.log_event(&statsig_post).await
+    }
+
+    /// Logs custom experiment exposures to Statsig.
+    /// This is the correct way to log experiment exposures for holdout tracking.
+    pub async fn log_custom_exposure(&self, exposure_post: &ExperimentExposurePost) -> Result<()> {
+        let url = format!("{}/log_custom_exposure", self.events_url);
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PostBody<'a> {
+            exposures: &'a [crate::models::ExperimentExposure],
+            #[serde(skip_serializing_if = "Option::is_none")]
+            statsig_metadata: Option<&'a StatsigMetadata>,
+        }
+
+        let body = PostBody {
+            exposures: &exposure_post.exposures,
+            statsig_metadata: exposure_post.statsig_metadata.as_ref(),
+        };
+
+        let response = self.http_client.post(url).json(&body).send().await;
+
+        match response {
+            Ok(result) => match result.status() {
+                StatusCode::OK | StatusCode::CREATED | StatusCode::ACCEPTED => Ok(result),
+                err => Err(anyhow!("statsig error logging custom exposure: {}", err)),
+            },
+            Err(err) => Err(anyhow!("failed to send custom exposure request: {}", err)),
+        }?;
+
+        Ok(())
     }
 
     pub async fn fetch_state_from_source(&self) -> Result<ConfigData> {

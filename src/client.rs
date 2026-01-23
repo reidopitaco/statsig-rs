@@ -12,12 +12,17 @@ use tracing::{event, Level};
 use crate::{
     evaluator::{models::EvalResult, Evaluator},
     http::StatsigHttpClient,
-    models::{StatsigConfig, StatsigEvent, StatsigOptions, StatsigPost, StatsigUser},
+    models::{
+        ExperimentExposure, ExperimentExposurePost, SecondaryExposure, StatsigConfig, StatsigEvent,
+        StatsigExperiment, StatsigMetadata, StatsigOptions, StatsigPost, StatsigUser,
+    },
 };
 
 const GATE_EXPOSURE_EVENT: &str = "statsig::gate_exposure";
 const CONFIG_EXPOSURE_EVENT: &str = "statsig::config_exposure";
 const MAX_LOG_EVENTS: usize = 950;
+const RUST_SDK_TYPE: &str = "rust-server";
+const RUST_SDK_VERSION: &str = "0.9.0";
 
 /// Statsig client that has a local cache and syncs with the API periodically.
 pub struct Client {
@@ -139,10 +144,127 @@ impl Client {
     pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
         self.http_client.log_event(statsig_post).await
     }
+
+    /// Gets an experiment and logs the exposure properly for holdout tracking.
+    ///
+    /// This method differs from `get_dynamic_config` in two important ways:
+    /// 1. When cache is disabled (HTTP API call): The API automatically logs exposures
+    ///    including holdout information - no manual logging needed.
+    /// 2. When cache is enabled (local evaluation): Uses `/log_custom_exposure` endpoint
+    ///    to properly log experiment exposures with holdout tracking.
+    pub async fn get_experiment<T: DeserializeOwned>(
+        self: Arc<Self>,
+        experiment_name: String,
+        user: StatsigUser,
+    ) -> Result<StatsigExperiment<T>> {
+        if user.user_id.is_empty() {
+            bail!("statsig: missing user id");
+        }
+
+        if self.disable_cache {
+            let config: StatsigConfig<T> = self
+                .http_client
+                .get_config(experiment_name.clone(), user)
+                .await?;
+
+            return Ok(StatsigExperiment {
+                value: config.value,
+                name: config.name,
+                group_name: config.group_name,
+                rule_id: config.rule_id,
+                group: config.group,
+                secondary_exposures: vec![],
+            });
+        }
+
+        let res = self
+            .evaluator
+            .get_dynamic_config_internal(&user, &experiment_name);
+
+        if res.fetch_from_server {
+            let config: StatsigConfig<T> = self
+                .http_client
+                .get_config(experiment_name.clone(), user)
+                .await?;
+
+            return Ok(StatsigExperiment {
+                value: config.value,
+                name: config.name,
+                group_name: config.group_name,
+                rule_id: config.rule_id,
+                group: config.group,
+                secondary_exposures: vec![],
+            });
+        }
+
+        let secondary_exposures: Vec<SecondaryExposure> = res
+            .secondary_exposures
+            .iter()
+            .filter_map(SecondaryExposure::from_hashmap)
+            .collect();
+
+        let value: Option<T> =
+            serde_json::from_value(res.config_value.clone().unwrap_or(serde_json::Value::Null))?;
+
+        self.clone()
+            .log_experiment_exposure_async(
+                experiment_name.clone(),
+                user,
+                res.group.clone(),
+                res.rule_id.clone(),
+                secondary_exposures.clone(),
+            )
+            .await;
+
+        Ok(StatsigExperiment {
+            value,
+            name: experiment_name,
+            group_name: res.group_name,
+            rule_id: res.rule_id,
+            group: res.group,
+            secondary_exposures,
+        })
+    }
 }
 
 // Private methods
 impl Client {
+    /// Logs experiment exposure asynchronously without blocking or returning errors.
+    /// Errors are logged but not propagated.
+    async fn log_experiment_exposure_async(
+        self: Arc<Self>,
+        experiment_name: String,
+        user: StatsigUser,
+        group: String,
+        rule_id: String,
+        secondary_exposures: Vec<SecondaryExposure>,
+    ) {
+        let exposure = ExperimentExposure {
+            user,
+            experiment_name: experiment_name.clone(),
+            group,
+            rule_id,
+            secondary_exposures,
+        };
+
+        let post = ExperimentExposurePost {
+            exposures: vec![exposure],
+            statsig_metadata: Some(StatsigMetadata {
+                sdk_type: RUST_SDK_TYPE.to_string(),
+                sdk_version: RUST_SDK_VERSION.to_string(),
+            }),
+        };
+
+        if let Err(e) = self.http_client.log_custom_exposure(&post).await {
+            event!(
+                Level::ERROR,
+                "Failed to log experiment exposure for {}: {}",
+                experiment_name,
+                e
+            );
+        }
+    }
+
     async fn poll_for_changes(self: Arc<Self>, config_sync_interval: Option<Duration>) {
         let mut interval =
             time::interval(config_sync_interval.unwrap_or_else(|| Duration::from_secs(20)));
