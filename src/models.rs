@@ -13,6 +13,76 @@ pub struct StatsigConfig<T> {
     pub group: String,
 }
 
+/// Represents the result of an experiment evaluation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatsigExperiment<T> {
+    pub value: Option<T>,
+    pub name: String,
+    pub group_name: Option<String>,
+    pub rule_id: String,
+    pub group: String,
+    /// Secondary exposures (gates that were evaluated as part of this experiment)
+    #[serde(default)]
+    pub secondary_exposures: Vec<SecondaryExposure>,
+}
+
+/// Represents a secondary exposure (e.g., a gate that was checked as part of an experiment)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecondaryExposure {
+    pub gate: String,
+    pub gate_value: String,
+    pub rule_id: String,
+}
+
+impl SecondaryExposure {
+    pub fn from_hashmap(map: &std::collections::HashMap<String, String>) -> Option<Self> {
+        Some(Self {
+            gate: map.get("gate")?.clone(),
+            gate_value: map.get("gateValue")?.clone(),
+            rule_id: map.get("ruleID")?.clone(),
+        })
+    }
+
+    pub fn to_hashmap(&self) -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::from([
+            ("gate".to_string(), self.gate.clone()),
+            ("gateValue".to_string(), self.gate_value.clone()),
+            ("ruleID".to_string(), self.rule_id.clone()),
+        ])
+    }
+}
+
+/// Request body for logging custom experiment exposures
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperimentExposurePost {
+    pub exposures: Vec<ExperimentExposure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statsig_metadata: Option<StatsigMetadata>,
+}
+
+/// A single experiment exposure to log
+#[skip_serializing_none]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperimentExposure {
+    pub user: StatsigUser,
+    pub experiment_name: String,
+    pub group: String,
+    pub rule_id: String,
+    #[serde(default)]
+    pub secondary_exposures: Vec<SecondaryExposure>,
+}
+
+/// SDK metadata for tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsigMetadata {
+    pub sdk_type: String,
+    pub sdk_version: String,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatsigPost {
