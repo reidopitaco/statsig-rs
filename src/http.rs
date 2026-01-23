@@ -13,7 +13,10 @@ use tokio_retry::{
 
 use crate::{
     evaluator::models::ConfigData,
-    models::{ExperimentExposurePost, StatsigConfig, StatsigEvent, StatsigMetadata, StatsigPost, StatsigUser},
+    models::{
+        ExperimentExposurePost, StatsigConfig, StatsigEvent, StatsigMetadata, StatsigPost,
+        StatsigUser,
+    },
 };
 
 const API_URL: &str = "https://api.statsig.com/v1";
