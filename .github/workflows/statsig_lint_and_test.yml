@@ -14,10 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v1
 
       - name: Setup Rust Toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
 
       - name: Setup Rust Platform
         shell: bash
