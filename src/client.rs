@@ -145,6 +145,30 @@ impl Client {
         self.http_client.log_event(statsig_post).await
     }
 
+    pub async fn get_experiment_without_local_evaluation<T: DeserializeOwned>(
+        self: Arc<Self>,
+        experiment_name: String,
+        user: StatsigUser,
+    ) -> Result<StatsigExperiment<T>> {
+        if user.user_id.is_empty() {
+            bail!("statsig: missing user id");
+        }
+
+        let config: StatsigConfig<T> = self
+            .http_client
+            .get_config(experiment_name.clone(), user)
+            .await?;
+
+        Ok(StatsigExperiment {
+            value: config.value,
+            name: config.name,
+            group_name: config.group_name,
+            rule_id: config.rule_id,
+            group: config.group,
+            secondary_exposures: vec![],
+        })
+    }
+
     /// Gets an experiment and logs the exposure properly for holdout tracking.
     ///
     /// This method differs from `get_dynamic_config` in two important ways:
