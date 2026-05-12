@@ -1,11 +1,12 @@
 use std::{
     cmp::max,
     collections::HashMap,
+    sync::Arc,
     time::{Duration, SystemTime},
 };
 
+use arc_swap::ArcSwap;
 use chrono::{Datelike, TimeZone, Utc};
-use crossbeam::sync::ShardedLock;
 use serde_json::json;
 
 use crate::{
@@ -94,18 +95,18 @@ fn eval_pass_percent(user: &StatsigUser, rule: &ConfigRule, spec: &ConfigSpec) -
 }
 
 pub struct Evaluator {
-    dynamic_configs: ShardedLock<HashMap<String, ConfigSpec>>,
-    gates: ShardedLock<HashMap<String, ConfigSpec>>,
+    dynamic_configs: ArcSwap<HashMap<String, ConfigSpec>>,
+    gates: ArcSwap<HashMap<String, ConfigSpec>>,
     #[allow(unused)]
-    layer_configs: ShardedLock<HashMap<String, ConfigSpec>>,
+    layer_configs: ArcSwap<HashMap<String, ConfigSpec>>,
 }
 
 impl Evaluator {
     pub fn new() -> Self {
         Self {
-            dynamic_configs: ShardedLock::new(HashMap::new()),
-            gates: ShardedLock::new(HashMap::new()),
-            layer_configs: ShardedLock::new(HashMap::new()),
+            dynamic_configs: ArcSwap::from_pointee(HashMap::new()),
+            gates: ArcSwap::from_pointee(HashMap::new()),
+            layer_configs: ArcSwap::from_pointee(HashMap::new()),
         }
     }
 
@@ -129,24 +130,14 @@ impl Evaluator {
             .map(|f| (f.name.clone(), f))
             .collect();
 
-        let mut dynamic_configs = self
-            .dynamic_configs
-            .write()
-            .expect("should not be poisoned");
-        *dynamic_configs = new_dynamic_configs;
-        let mut gates = self.gates.write().expect("should not be poisoned");
-        *gates = feature_gates;
-        let mut layers = self.layer_configs.write().expect("should not be poisoned");
-        *layers = layer_configs;
+        self.dynamic_configs.store(Arc::new(new_dynamic_configs));
+        self.gates.store(Arc::new(feature_gates));
+        self.layer_configs.store(Arc::new(layer_configs));
     }
 
     pub fn check_gate_internal(&self, user: &StatsigUser, gate_name: &String) -> EvalResult {
-        match self
-            .gates
-            .read()
-            .expect("should always be able to acquire read lock")
-            .get(gate_name)
-        {
+        let gates = self.gates.load();
+        match gates.get(gate_name) {
             Some(gate) => self.eval_spec(user, gate),
             None => EvalResult::fail(),
         }
@@ -157,12 +148,8 @@ impl Evaluator {
         user: &StatsigUser,
         config_name: &String,
     ) -> EvalResult {
-        match self
-            .dynamic_configs
-            .read()
-            .expect("should always be able to acquire read lock")
-            .get(config_name)
-        {
+        let configs = self.dynamic_configs.load();
+        match configs.get(config_name) {
             Some(spec) => self.eval_spec(user, spec),
             None => EvalResult::fail(),
         }

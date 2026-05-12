@@ -1,12 +1,8 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::SystemTime,
-};
+use std::{collections::HashMap, sync::Arc, time::SystemTime};
 
 use anyhow::{anyhow, bail, Result};
 use serde::de::DeserializeOwned;
-use tokio::{time, time::Duration};
+use tokio::{sync::Mutex, time, time::Duration};
 use tracing::{event, Level};
 
 use crate::{
@@ -76,7 +72,7 @@ impl Client {
             self.http_client.check_gate(gate, user).await
         } else {
             let pass = res.pass;
-            self.log_gate_exposure(gate, user, res);
+            self.log_gate_exposure(gate, user, res).await;
             Ok(pass)
         }
     }
@@ -99,7 +95,7 @@ impl Client {
             self.http_client.get_dynamic_config(config, user).await
         } else {
             let val = res.config_value.take();
-            self.log_config_exposure(config, user, res);
+            self.log_config_exposure(config, user, res).await;
             let val = val.ok_or_else(|| anyhow!("empty config"))?;
             Ok(serde_json::from_value(val)?)
         }
@@ -135,7 +131,7 @@ impl Client {
                 group: res.group.clone(),
             };
 
-            self.log_config_exposure(config, user, res);
+            self.log_config_exposure(config, user, res).await;
 
             Ok(val)
         }
@@ -323,10 +319,7 @@ impl Client {
     async fn flush_logs(self: Arc<Self>) {
         let events;
         {
-            let mut logs = self
-                .event_logs
-                .lock()
-                .expect("should always be able to acquire lock");
+            let mut logs = self.event_logs.lock().await;
             events = std::mem::take(&mut *logs);
         }
 
@@ -344,7 +337,7 @@ impl Client {
         }
     }
 
-    fn log_gate_exposure(
+    async fn log_gate_exposure(
         self: Arc<Self>,
         gate: String,
         user: StatsigUser,
@@ -365,17 +358,15 @@ impl Client {
                 ("ruleID".to_string(), eval_result.id),
             ]),
         };
-        let mut events = self
-            .event_logs
-            .lock()
-            .expect("should always be able to acquire lock");
+        let mut events = self.event_logs.lock().await;
         events.push(event);
         if events.len() >= MAX_LOG_EVENTS {
+            drop(events);
             tokio::spawn(self.clone().flush_logs());
         }
     }
 
-    fn log_config_exposure(
+    async fn log_config_exposure(
         self: Arc<Self>,
         config: String,
         user: StatsigUser,
@@ -395,12 +386,10 @@ impl Client {
                 ("ruleID".to_string(), eval_result.id),
             ]),
         };
-        let mut events = self
-            .event_logs
-            .lock()
-            .expect("should always be able to acquire lock");
+        let mut events = self.event_logs.lock().await;
         events.push(event);
         if events.len() >= MAX_LOG_EVENTS {
+            drop(events);
             tokio::spawn(self.clone().flush_logs());
         }
     }
