@@ -1,6 +1,6 @@
 [package]
 name = "statsig-rs"
-version = "0.9.1"
+version = "0.10.0-rc.1"
 edition = "2021"
 description = "Unofficial crate to interact with statsig.io"
 repository = "https://github.com/reidopitaco/statsig-rs"
@@ -16,7 +16,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { version = "1.0" }
 chrono = { version = "0.4", features = ["serde"] }
-crossbeam = "0.8"
+arc-swap = "1"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
