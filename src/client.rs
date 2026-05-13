@@ -358,10 +358,12 @@ impl Client {
                 ("ruleID".to_string(), eval_result.id),
             ]),
         };
-        let mut events = self.event_logs.lock().await;
-        events.push(event);
-        if events.len() >= MAX_LOG_EVENTS {
-            drop(events);
+        let should_flush = {
+            let mut events = self.event_logs.lock().await;
+            events.push(event);
+            events.len() >= MAX_LOG_EVENTS
+        };
+        if should_flush {
             tokio::spawn(self.clone().flush_logs());
         }
     }
@@ -386,10 +388,12 @@ impl Client {
                 ("ruleID".to_string(), eval_result.id),
             ]),
         };
-        let mut events = self.event_logs.lock().await;
-        events.push(event);
-        if events.len() >= MAX_LOG_EVENTS {
-            drop(events);
+        let should_flush = {
+            let mut events = self.event_logs.lock().await;
+            events.push(event);
+            events.len() >= MAX_LOG_EVENTS
+        };
+        if should_flush {
             tokio::spawn(self.clone().flush_logs());
         }
     }
