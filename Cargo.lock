@@ -1175,7 +1175,7 @@ dependencies = [
 
 [[package]]
 name = "statsig-rs"
-version = "0.10.0"
+version = "0.10.0-rc.0"
 dependencies = [
  "anyhow",
  "arc-swap",
