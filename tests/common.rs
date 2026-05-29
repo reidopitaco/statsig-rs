@@ -145,6 +145,7 @@ pub async fn create_client() -> Arc<Client> {
             cdn_url: Some(format!("http://{}", http_server.addr())),
             events_url: Some(format!("http://{}", http_server.addr())),
             disable_cache: false,
+            disable_logging: false,
             config_sync_interval: None,
         },
     )
