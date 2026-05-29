@@ -23,6 +23,7 @@ const RUST_SDK_VERSION: &str = "0.9.0";
 /// Statsig client that has a local cache and syncs with the API periodically.
 pub struct Client {
     disable_cache: bool,
+    disable_logging: bool,
     http_client: StatsigHttpClient,
     evaluator: Evaluator,
     event_logs: Mutex<Vec<StatsigEvent>>,
@@ -45,6 +46,7 @@ impl Client {
 
         let s = Arc::new(Self {
             disable_cache: options.disable_cache,
+            disable_logging: options.disable_logging,
             evaluator,
             http_client,
             event_logs: Mutex::new(vec![]),
@@ -52,7 +54,9 @@ impl Client {
 
         if !options.disable_cache {
             tokio::spawn(s.clone().poll_for_changes(options.config_sync_interval));
-            tokio::spawn(s.clone().background_logs_flush());
+            if !options.disable_logging {
+                tokio::spawn(s.clone().background_logs_flush());
+            }
         }
 
         Ok(s)
@@ -138,6 +142,9 @@ impl Client {
     }
 
     pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
+        if self.disable_logging {
+            return Ok(());
+        }
         self.http_client.log_event(statsig_post).await
     }
 
@@ -259,6 +266,9 @@ impl Client {
         rule_id: String,
         secondary_exposures: Vec<SecondaryExposure>,
     ) {
+        if self.disable_logging {
+            return;
+        }
         let exposure = ExperimentExposure {
             user,
             experiment_name: experiment_name.clone(),
@@ -343,6 +353,9 @@ impl Client {
         user: StatsigUser,
         eval_result: EvalResult,
     ) {
+        if self.disable_logging {
+            return;
+        }
         let event = StatsigEvent {
             event_name: GATE_EXPOSURE_EVENT.to_string(),
             value: eval_result.pass.to_string(),
@@ -374,6 +387,9 @@ impl Client {
         user: StatsigUser,
         eval_result: EvalResult,
     ) {
+        if self.disable_logging {
+            return;
+        }
         let event = StatsigEvent {
             event_name: CONFIG_EXPOSURE_EVENT.to_string(),
             value: eval_result.pass.to_string(),

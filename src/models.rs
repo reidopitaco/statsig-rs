@@ -122,6 +122,7 @@ pub struct StatsigOptions {
     pub cdn_url: Option<String>,
     pub events_url: Option<String>,
     pub disable_cache: bool,
+    pub disable_logging: bool,
     pub config_sync_interval: Option<Duration>,
 }
 
@@ -131,6 +132,7 @@ impl StatsigOptions {
             api_url: None,
             cdn_url: None,
             disable_cache: false,
+            disable_logging: false,
             config_sync_interval: None,
             events_url: None,
         }
@@ -141,6 +143,7 @@ impl StatsigOptions {
             api_url: None,
             cdn_url: None,
             disable_cache: true,
+            disable_logging: false,
             config_sync_interval: None,
             events_url: None,
         }

@@ -14,6 +14,7 @@ async fn main() {
             cdn_url: None,
             events_url: None,
             disable_cache: false,
+            disable_logging: false,
             config_sync_interval: Some(Duration::from_secs(5)),
         },
     )
