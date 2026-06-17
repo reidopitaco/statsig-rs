@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, time::SystemTime};
 use anyhow::{anyhow, bail, Result};
 use serde::de::DeserializeOwned;
 use tokio::{sync::Mutex, time, time::Duration};
-use tracing::{event, Level};
+use tracing::{event, info_span, Instrument as _, Level, Span};
 
 use crate::{
     evaluator::{models::EvalResult, Evaluator},
@@ -63,22 +63,33 @@ impl Client {
     }
 
     pub async fn check_gate(self: Arc<Self>, gate: String, user: StatsigUser) -> Result<bool> {
-        if user.user_id.is_empty() {
-            bail!("statsig: missing user id");
-        }
+        let span = info_span!(
+            "statsig.check_gate",
+            "otel.name" = %format_args!("statsig.check_gate {gate}"),
+            gate_name = gate.as_str(),
+            "statsig.evaluation" = "http",
+        );
+        async {
+            if user.user_id.is_empty() {
+                bail!("statsig: missing user id");
+            }
 
-        if self.disable_cache {
-            return self.http_client.check_gate(gate, user).await;
-        }
+            if self.disable_cache {
+                return self.http_client.check_gate(gate, user).await;
+            }
 
-        let res = self.evaluator.check_gate_internal(&user, &gate);
-        if res.fetch_from_server {
-            self.http_client.check_gate(gate, user).await
-        } else {
-            let pass = res.pass;
-            self.log_gate_exposure(gate, user, res).await;
-            Ok(pass)
+            let res = self.evaluator.check_gate_internal(&user, &gate);
+            if res.fetch_from_server {
+                self.http_client.check_gate(gate, user).await
+            } else {
+                Span::current().record("statsig.evaluation", &"local");
+                let pass = res.pass;
+                self.log_gate_exposure(gate, user, res).await;
+                Ok(pass)
+            }
         }
+        .instrument(span)
+        .await
     }
 
     pub async fn get_dynamic_config<T: DeserializeOwned>(
@@ -86,23 +97,34 @@ impl Client {
         config: String,
         user: StatsigUser,
     ) -> Result<T> {
-        if user.user_id.is_empty() {
-            bail!("statsig: missing user id");
-        }
+        let span = info_span!(
+            "statsig.get_dynamic_config",
+            "otel.name" = %format_args!("statsig.get_dynamic_config {config}"),
+            config_name = config.as_str(),
+            "statsig.evaluation" = "http",
+        );
+        async {
+            if user.user_id.is_empty() {
+                bail!("statsig: missing user id");
+            }
 
-        if self.disable_cache {
-            return self.http_client.get_dynamic_config(config, user).await;
-        }
+            if self.disable_cache {
+                return self.http_client.get_dynamic_config(config, user).await;
+            }
 
-        let mut res = self.evaluator.get_dynamic_config_internal(&user, &config);
-        if res.fetch_from_server {
-            self.http_client.get_dynamic_config(config, user).await
-        } else {
-            let val = res.config_value.take();
-            self.log_config_exposure(config, user, res).await;
-            let val = val.ok_or_else(|| anyhow!("empty config"))?;
-            Ok(serde_json::from_value(val)?)
+            let mut res = self.evaluator.get_dynamic_config_internal(&user, &config);
+            if res.fetch_from_server {
+                self.http_client.get_dynamic_config(config, user).await
+            } else {
+                Span::current().record("statsig.evaluation", &"local");
+                let val = res.config_value.take();
+                self.log_config_exposure(config, user, res).await;
+                let val = val.ok_or_else(|| anyhow!("empty config"))?;
+                Ok(serde_json::from_value(val)?)
+            }
         }
+        .instrument(span)
+        .await
     }
 
     /// Returns the value, together with the metadata about the group that matched the check
@@ -111,34 +133,45 @@ impl Client {
         config: String,
         user: StatsigUser,
     ) -> Result<StatsigConfig<T>> {
-        if user.user_id.is_empty() {
-            bail!("statsig: missing user id");
+        let span = info_span!(
+            "statsig.get_config",
+            "otel.name" = %format_args!("statsig.get_config {config}"),
+            config_name = config.as_str(),
+            "statsig.evaluation" = "http",
+        );
+        async {
+            if user.user_id.is_empty() {
+                bail!("statsig: missing user id");
+            }
+
+            if self.disable_cache {
+                return self.http_client.get_config(config, user).await;
+            }
+
+            let res = self.evaluator.get_dynamic_config_internal(&user, &config);
+            if res.fetch_from_server {
+                self.http_client.get_config(config, user).await
+            } else {
+                Span::current().record("statsig.evaluation", &"local");
+                let value: Option<T> = serde_json::from_value(
+                    res.config_value.clone().unwrap_or(serde_json::Value::Null),
+                )?;
+
+                let val = StatsigConfig {
+                    value,
+                    name: config.clone(),
+                    group_name: res.group_name.clone(),
+                    rule_id: res.rule_id.clone(),
+                    group: res.group.clone(),
+                };
+
+                self.log_config_exposure(config, user, res).await;
+
+                Ok(val)
+            }
         }
-
-        if self.disable_cache {
-            return self.http_client.get_config(config, user).await;
-        }
-
-        let res = self.evaluator.get_dynamic_config_internal(&user, &config);
-        if res.fetch_from_server {
-            self.http_client.get_config(config, user).await
-        } else {
-            let value: Option<T> = serde_json::from_value(
-                res.config_value.clone().unwrap_or(serde_json::Value::Null),
-            )?;
-
-            let val = StatsigConfig {
-                value,
-                name: config.clone(),
-                group_name: res.group_name.clone(),
-                rule_id: res.rule_id.clone(),
-                group: res.group.clone(),
-            };
-
-            self.log_config_exposure(config, user, res).await;
-
-            Ok(val)
-        }
+        .instrument(span)
+        .await
     }
 
     pub async fn log_event(&self, statsig_post: &StatsigPost) -> Result<()> {
@@ -153,23 +186,33 @@ impl Client {
         experiment_name: String,
         user: StatsigUser,
     ) -> Result<StatsigExperiment<T>> {
-        if user.user_id.is_empty() {
-            bail!("statsig: missing user id");
+        let span = info_span!(
+            "statsig.get_experiment_remote",
+            "otel.name" = %format_args!("statsig.get_experiment_remote {experiment_name}"),
+            experiment_name = experiment_name.as_str(),
+            "statsig.evaluation" = "http",
+        );
+        async {
+            if user.user_id.is_empty() {
+                bail!("statsig: missing user id");
+            }
+
+            let config: StatsigConfig<T> = self
+                .http_client
+                .get_config(experiment_name.clone(), user)
+                .await?;
+
+            Ok(StatsigExperiment {
+                value: config.value,
+                name: config.name,
+                group_name: config.group_name,
+                rule_id: config.rule_id,
+                group: config.group,
+                secondary_exposures: vec![],
+            })
         }
-
-        let config: StatsigConfig<T> = self
-            .http_client
-            .get_config(experiment_name.clone(), user)
-            .await?;
-
-        Ok(StatsigExperiment {
-            value: config.value,
-            name: config.name,
-            group_name: config.group_name,
-            rule_id: config.rule_id,
-            group: config.group,
-            secondary_exposures: vec![],
-        })
+        .instrument(span)
+        .await
     }
 
     /// Gets an experiment and logs the exposure properly for holdout tracking.
@@ -184,73 +227,85 @@ impl Client {
         experiment_name: String,
         user: StatsigUser,
     ) -> Result<StatsigExperiment<T>> {
-        if user.user_id.is_empty() {
-            bail!("statsig: missing user id");
+        let span = info_span!(
+            "statsig.get_experiment",
+            "otel.name" = %format_args!("statsig.get_experiment {experiment_name}"),
+            experiment_name = experiment_name.as_str(),
+            "statsig.evaluation" = "http",
+        );
+        async {
+            if user.user_id.is_empty() {
+                bail!("statsig: missing user id");
+            }
+
+            if self.disable_cache {
+                let config: StatsigConfig<T> = self
+                    .http_client
+                    .get_config(experiment_name.clone(), user)
+                    .await?;
+
+                return Ok(StatsigExperiment {
+                    value: config.value,
+                    name: config.name,
+                    group_name: config.group_name,
+                    rule_id: config.rule_id,
+                    group: config.group,
+                    secondary_exposures: vec![],
+                });
+            }
+
+            let res = self
+                .evaluator
+                .get_dynamic_config_internal(&user, &experiment_name);
+
+            if res.fetch_from_server {
+                let config: StatsigConfig<T> = self
+                    .http_client
+                    .get_config(experiment_name.clone(), user)
+                    .await?;
+
+                return Ok(StatsigExperiment {
+                    value: config.value,
+                    name: config.name,
+                    group_name: config.group_name,
+                    rule_id: config.rule_id,
+                    group: config.group,
+                    secondary_exposures: vec![],
+                });
+            }
+
+            Span::current().record("statsig.evaluation", &"local");
+            let secondary_exposures: Vec<SecondaryExposure> = res
+                .secondary_exposures
+                .iter()
+                .filter_map(SecondaryExposure::from_hashmap)
+                .collect();
+
+            let value: Option<T> = serde_json::from_value(
+                res.config_value.clone().unwrap_or(serde_json::Value::Null),
+            )?;
+
+            self.clone()
+                .log_experiment_exposure_async(
+                    experiment_name.clone(),
+                    user,
+                    res.group.clone(),
+                    res.rule_id.clone(),
+                    secondary_exposures.clone(),
+                )
+                .await;
+
+            Ok(StatsigExperiment {
+                value,
+                name: experiment_name,
+                group_name: res.group_name,
+                rule_id: res.rule_id,
+                group: res.group,
+                secondary_exposures,
+            })
         }
-
-        if self.disable_cache {
-            let config: StatsigConfig<T> = self
-                .http_client
-                .get_config(experiment_name.clone(), user)
-                .await?;
-
-            return Ok(StatsigExperiment {
-                value: config.value,
-                name: config.name,
-                group_name: config.group_name,
-                rule_id: config.rule_id,
-                group: config.group,
-                secondary_exposures: vec![],
-            });
-        }
-
-        let res = self
-            .evaluator
-            .get_dynamic_config_internal(&user, &experiment_name);
-
-        if res.fetch_from_server {
-            let config: StatsigConfig<T> = self
-                .http_client
-                .get_config(experiment_name.clone(), user)
-                .await?;
-
-            return Ok(StatsigExperiment {
-                value: config.value,
-                name: config.name,
-                group_name: config.group_name,
-                rule_id: config.rule_id,
-                group: config.group,
-                secondary_exposures: vec![],
-            });
-        }
-
-        let secondary_exposures: Vec<SecondaryExposure> = res
-            .secondary_exposures
-            .iter()
-            .filter_map(SecondaryExposure::from_hashmap)
-            .collect();
-
-        let value: Option<T> =
-            serde_json::from_value(res.config_value.clone().unwrap_or(serde_json::Value::Null))?;
-
-        self.clone()
-            .log_experiment_exposure_async(
-                experiment_name.clone(),
-                user,
-                res.group.clone(),
-                res.rule_id.clone(),
-                secondary_exposures.clone(),
-            )
-            .await;
-
-        Ok(StatsigExperiment {
-            value,
-            name: experiment_name,
-            group_name: res.group_name,
-            rule_id: res.rule_id,
-            group: res.group,
-            secondary_exposures,
-        })
+        .instrument(span)
+        .await
     }
 }
 
